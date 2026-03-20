@@ -1,20 +1,20 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  View,
+  Button,
+  FlatList,
+  Modal,
+  StyleSheet,
   Text,
   TextInput,
-  Button,
-  StyleSheet,
-  FlatList,
-  Modal
+  View
 } from "react-native";
-import {
-  criarBancada,
-  listarBancadas,
-  atualizarBancada,
-  excluirBancada
-} from "../services/bancadaService";
 import OptionSelectField from "../components/OptionSelectField";
+import {
+  atualizarBancada,
+  criarBancada,
+  excluirBancada,
+  listarBancadas
+} from "../services/bancadaService";
 
 export default function CadastroBancadasScreen({ onVoltar }) {
   const [codigo, setCodigo] = useState("");
@@ -36,7 +36,6 @@ export default function CadastroBancadasScreen({ onVoltar }) {
 
   const OPCOES_TIPO_BANCADA = [
     { label: "Berçário", value: "bercario" },
-    { label: "Engorda", value: "engorda" },
     { label: "Final", value: "final" }
   ];
 
@@ -55,7 +54,7 @@ export default function CadastroBancadasScreen({ onVoltar }) {
   async function carregar() {
     try {
       const lista = await listarBancadas();
-      setBancadas(lista.sort((a, b) => a.codigo.localeCompare(b.codigo)));
+      setBancadas(lista);
     } catch (error) {
       alert(error.message);
     }
@@ -105,9 +104,9 @@ export default function CadastroBancadasScreen({ onVoltar }) {
   async function salvarEdicao() {
     try {
       await atualizarBancada(itemEditando.id, {
-        tipo: editTipo.trim().toLowerCase(),
+        tipo: editTipo,
         capacidade_total: Number(editCapacidade),
-        status: editStatus.trim().toLowerCase(),
+        status: editStatus,
         x: Number(editX),
         y: Number(editY)
       });
@@ -158,7 +157,12 @@ export default function CadastroBancadasScreen({ onVoltar }) {
       <Text style={styles.titulo}>CRUD de Bancadas</Text>
 
       <Text style={styles.label}>Código</Text>
-      <TextInput style={styles.input} value={codigo} onChangeText={setCodigo} placeholder="B01" />
+      <TextInput
+        style={styles.input}
+        value={codigo}
+        onChangeText={setCodigo}
+        placeholder="B01 ou F01"
+      />
 
       <OptionSelectField
         label="Tipo"
@@ -168,7 +172,12 @@ export default function CadastroBancadasScreen({ onVoltar }) {
       />
 
       <Text style={styles.label}>Capacidade Total</Text>
-      <TextInput style={styles.input} value={capacidadeTotal} onChangeText={setCapacidadeTotal} keyboardType="numeric" />
+      <TextInput
+        style={styles.input}
+        value={capacidadeTotal}
+        onChangeText={setCapacidadeTotal}
+        keyboardType="numeric"
+      />
 
       <OptionSelectField
         label="Status"
@@ -178,10 +187,20 @@ export default function CadastroBancadasScreen({ onVoltar }) {
       />
 
       <Text style={styles.label}>Posição X</Text>
-      <TextInput style={styles.input} value={x} onChangeText={setX} keyboardType="numeric" />
+      <TextInput
+        style={styles.input}
+        value={x}
+        onChangeText={setX}
+        keyboardType="numeric"
+      />
 
       <Text style={styles.label}>Posição Y</Text>
-      <TextInput style={styles.input} value={y} onChangeText={setY} keyboardType="numeric" />
+      <TextInput
+        style={styles.input}
+        value={y}
+        onChangeText={setY}
+        keyboardType="numeric"
+      />
 
       <Button title="Cadastrar Bancada" onPress={handleCriar} />
 
@@ -206,7 +225,12 @@ export default function CadastroBancadasScreen({ onVoltar }) {
             />
 
             <Text style={styles.label}>Capacidade</Text>
-            <TextInput style={styles.input} value={editCapacidade} onChangeText={setEditCapacidade} keyboardType="numeric" />
+            <TextInput
+              style={styles.input}
+              value={editCapacidade}
+              onChangeText={setEditCapacidade}
+              keyboardType="numeric"
+            />
 
             <OptionSelectField
               label="Status"
@@ -216,10 +240,20 @@ export default function CadastroBancadasScreen({ onVoltar }) {
             />
 
             <Text style={styles.label}>Posição X</Text>
-            <TextInput style={styles.input} value={editX} onChangeText={setEditX} keyboardType="numeric" />
+            <TextInput
+              style={styles.input}
+              value={editX}
+              onChangeText={setEditX}
+              keyboardType="numeric"
+            />
 
             <Text style={styles.label}>Posição Y</Text>
-            <TextInput style={styles.input} value={editY} onChangeText={setEditY} keyboardType="numeric" />
+            <TextInput
+              style={styles.input}
+              value={editY}
+              onChangeText={setEditY}
+              keyboardType="numeric"
+            />
 
             <Button title="Salvar" onPress={salvarEdicao} />
             <View style={{ height: 10 }} />

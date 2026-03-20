@@ -1,29 +1,34 @@
-import React, { useEffect, useState } from "react";
+import { get, ref } from "firebase/database";
+import { useEffect, useMemo, useState } from "react";
 import {
-  View,
+  Button,
+  Modal,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
-  Button,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity
+  TouchableOpacity,
+  View
 } from "react-native";
-import { get, ref } from "firebase/database";
-import { db } from "../config/firebaseConfig";
-import {
-  registrarEntradaComLote,
-  listarEntradas,
-  validarDataISO
-} from "../services/entradaService";
-import { calcularResumoLotes } from "../services/saldoLoteService";
 import DatePickerField from "../components/DatePickerField";
 import OptionSelectField from "../components/OptionSelectField";
+import SelectCardList from "../components/SelectCardList";
+import { db } from "../config/firebaseConfig";
+import { listarBancadas } from "../services/bancadaService";
+import {
+  listarEntradas,
+  registrarEntradaComLote,
+  validarDataISO
+} from "../services/entradaService";
+import { registrarOcupacaoBancada } from "../services/ocupacaoService";
+import { calcularResumoLotes } from "../services/saldoLoteService";
 
 export default function EntradaScreen() {
   const [fornecedores, setFornecedores] = useState([]);
   const [variedades, setVariedades] = useState([]);
   const [entradas, setEntradas] = useState([]);
   const [lotes, setLotes] = useState([]);
+  const [bancadas, setBancadas] = useState([]);
 
   const [fornecedorId, setFornecedorId] = useState("");
   const [variedadeId, setVariedadeId] = useState("");
@@ -32,6 +37,15 @@ export default function EntradaScreen() {
   const [unidade, setUnidade] = useState("bandeja");
   const [tipoOrigem, setTipoOrigem] = useState("muda");
   const [loteFornecedor, setLoteFornecedor] = useState("");
+  const [observacoes, setObservacoes] = useState("");
+
+  const [modalOcupacaoVisible, setModalOcupacaoVisible] = useState(false);
+  const [novoLoteCriado, setNovoLoteCriado] = useState(null);
+  const [bancadaSelecionadaId, setBancadaSelecionadaId] = useState("");
+  const [posicaoInicial, setPosicaoInicial] = useState("1");
+  const [posicaoFinal, setPosicaoFinal] = useState("");
+  const [quantidadeAlocada, setQuantidadeAlocada] = useState("");
+  const [dataInicioOcupacao, setDataInicioOcupacao] = useState("");
 
   const OPCOES_UNIDADE = [
     { label: "Bandeja", value: "bandeja" },
@@ -50,28 +64,28 @@ export default function EntradaScreen() {
 
   async function carregarTudo() {
     try {
-      const fornecedoresSnapshot = await get(ref(db, "fornecedores"));
-      const variedadesSnapshot = await get(ref(db, "variedades"));
+      const [fornecedoresSnapshot, variedadesSnapshot, listaLotes, listaEntradas, listaBancadas] =
+        await Promise.all([
+          get(ref(db, "fornecedores")),
+          get(ref(db, "variedades")),
+          calcularResumoLotes(),
+          listarEntradas(),
+          listarBancadas()
+        ]);
 
-      if (fornecedoresSnapshot.exists()) {
-        setFornecedores(Object.values(fornecedoresSnapshot.val()));
-      } else {
-        setFornecedores([]);
-      }
+      setFornecedores(
+        fornecedoresSnapshot.exists() ? Object.values(fornecedoresSnapshot.val()) : []
+      );
 
-      if (variedadesSnapshot.exists()) {
-        setVariedades(Object.values(variedadesSnapshot.val()));
-      } else {
-        setVariedades([]);
-      }
+      setVariedades(
+        variedadesSnapshot.exists() ? Object.values(variedadesSnapshot.val()) : []
+      );
 
-      const listaEntradas = await listarEntradas();
       setEntradas(listaEntradas);
-
-      const listaLotes = await calcularResumoLotes();
       setLotes(
         listaLotes.sort((a, b) => b.data_formacao.localeCompare(a.data_formacao))
       );
+      setBancadas(listaBancadas.filter((item) => item.active !== false));
     } catch (error) {
       alert(error.message);
     }
@@ -84,6 +98,33 @@ export default function EntradaScreen() {
   function variedadeSelecionada() {
     return variedades.find((item) => item.id === variedadeId);
   }
+
+  const bancadaSelecionada = useMemo(
+    () => bancadas.find((item) => item.id === bancadaSelecionadaId) || null,
+    [bancadas, bancadaSelecionadaId]
+  );
+
+  function tipoOcupacaoDaBancada() {
+    if (!bancadaSelecionada) return "";
+    return bancadaSelecionada.tipo === "bercario" ? "bercario" : "entrada_direta_final";
+  }
+
+  useEffect(() => {
+    if (!novoLoteCriado) return;
+
+    setQuantidadeAlocada(String(novoLoteCriado.quantidade_inicial || ""));
+    setDataInicioOcupacao(dataEntrada || "");
+  }, [novoLoteCriado, dataEntrada]);
+
+  useEffect(() => {
+    if (!bancadaSelecionada || !quantidadeAlocada) return;
+
+    const qtd = Number(quantidadeAlocada);
+    if (qtd > 0) {
+      setPosicaoInicial("1");
+      setPosicaoFinal(String(qtd));
+    }
+  }, [bancadaSelecionada, quantidadeAlocada]);
 
   async function handleRegistrar() {
     try {
@@ -111,25 +152,93 @@ export default function EntradaScreen() {
         quantidade_recebida: quantidadeRecebida,
         unidade,
         tipo_origem: tipoOrigem,
-        lote_fornecedor: loteFornecedor
+        lote_fornecedor: loteFornecedor,
+        observacoes
       });
 
       alert(
         `Entrada registrada!\n\nFornecedor: ${resultado.entrada.fornecedor_nome}\nVariedade: ${resultado.entrada.variedade_nome}\nLote gerado: ${resultado.lote.codigo_lote}\nQuantidade inicial: ${resultado.lote.quantidade_inicial}`
       );
 
+      setNovoLoteCriado(resultado.lote);
+      setBancadaSelecionadaId("");
+      setPosicaoInicial("1");
+      setPosicaoFinal(String(resultado.lote.quantidade_inicial || ""));
+      setQuantidadeAlocada(String(resultado.lote.quantidade_inicial || ""));
+      setDataInicioOcupacao(resultado.lote.data_formacao || "");
+
       setFornecedorId("");
       setVariedadeId("");
-      setDataEntrada("");
       setQuantidadeRecebida("");
       setUnidade("bandeja");
       setTipoOrigem("muda");
       setLoteFornecedor("");
+      setObservacoes("");
 
-      carregarTudo();
+      await carregarTudo();
+      setModalOcupacaoVisible(true);
     } catch (error) {
       alert(error.message);
     }
+  }
+
+  async function handleOcuparAgora() {
+    try {
+      if (!novoLoteCriado) {
+        alert("Nenhum lote recém-criado encontrado.");
+        return;
+      }
+
+      if (
+        !bancadaSelecionadaId ||
+        !posicaoInicial ||
+        !posicaoFinal ||
+        !quantidadeAlocada ||
+        !dataInicioOcupacao
+      ) {
+        alert("Preencha os dados da ocupação.");
+        return;
+      }
+
+      if (!validarDataISO(dataInicioOcupacao.trim())) {
+        alert("A data da ocupação deve estar no formato YYYY-MM-DD e ser válida.");
+        return;
+      }
+
+      await registrarOcupacaoBancada({
+        lote_producao_id: novoLoteCriado.id,
+        bancada_id: bancadaSelecionadaId,
+        posicao_inicial: posicaoInicial,
+        posicao_final: posicaoFinal,
+        quantidade_alocada: quantidadeAlocada,
+        data_inicio: dataInicioOcupacao.trim(),
+        tipo_ocupacao: tipoOcupacaoDaBancada()
+      });
+
+      alert("Lote ocupado com sucesso!");
+
+      setModalOcupacaoVisible(false);
+      setNovoLoteCriado(null);
+      setBancadaSelecionadaId("");
+      setPosicaoInicial("1");
+      setPosicaoFinal("");
+      setQuantidadeAlocada("");
+      setDataInicioOcupacao("");
+
+      await carregarTudo();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+
+  function fecharModalSemOcupar() {
+    setModalOcupacaoVisible(false);
+    setNovoLoteCriado(null);
+    setBancadaSelecionadaId("");
+    setPosicaoInicial("1");
+    setPosicaoFinal("");
+    setQuantidadeAlocada("");
+    setDataInicioOcupacao("");
   }
 
   return (
@@ -226,6 +335,14 @@ export default function EntradaScreen() {
         placeholder="Opcional"
       />
 
+      <Text style={styles.label}>Observações</Text>
+      <TextInput
+        style={styles.input}
+        value={observacoes}
+        onChangeText={setObservacoes}
+        placeholder="Opcional"
+      />
+
       <Button title="Registrar Entrada e Gerar Lote" onPress={handleRegistrar} />
 
       <Text style={styles.subtitulo}>Lotes gerados</Text>
@@ -234,12 +351,12 @@ export default function EntradaScreen() {
           <Text style={styles.cardTitulo}>{item.codigo_lote}</Text>
           <Text>Variedade: {item.variedade_nome}</Text>
           <Text>Data: {item.data_formacao}</Text>
-          <Text>Total em produção: {item.total_em_producao}</Text>
+          <Text>Quantidade inicial: {item.quantidade_inicial}</Text>
           <Text>Saldo disponível para ocupar: {item.saldo_disponivel_para_ocupar}</Text>
           <Text>Total alocado em bancadas: {item.total_alocado_em_bancadas}</Text>
+          <Text>Total em produção: {item.total_em_producao}</Text>
           <Text>Tipo do lote: {item.tipo_lote}</Text>
           <Text>Status: {item.status}</Text>
-          <Text>Pronto para sublote: {item.preparado_para_sublote ? "Sim" : "Não"}</Text>
         </View>
       ))}
 
@@ -254,8 +371,83 @@ export default function EntradaScreen() {
           <Text>Unidade: {item.unidade}</Text>
           <Text>Tipo origem: {item.tipo_origem}</Text>
           <Text>Lote fornecedor: {item.lote_fornecedor || "-"}</Text>
+          <Text>Obs.: {item.observacoes || "-"}</Text>
         </View>
       ))}
+
+      <Modal visible={modalOcupacaoVisible} transparent animationType="slide">
+        <View style={styles.overlay}>
+          <View style={styles.modal}>
+            <Text style={styles.tituloModal}>Ocupar lote agora?</Text>
+
+            <Text style={styles.modalTexto}>
+              Lote: {novoLoteCriado?.codigo_lote || "-"}
+            </Text>
+            <Text style={styles.modalTexto}>
+              Variedade: {novoLoteCriado?.variedade_nome || "-"}
+            </Text>
+            <Text style={styles.modalTexto}>
+              Quantidade inicial: {novoLoteCriado?.quantidade_inicial || "-"}
+            </Text>
+
+            <SelectCardList
+              title="Escolha a bancada"
+              items={bancadas}
+              selectedId={bancadaSelecionadaId}
+              onSelect={setBancadaSelecionadaId}
+              emptyMessage="Nenhuma bancada cadastrada."
+              getTitle={(item) => item.codigo}
+              getSubtitle={(item) =>
+                `${item.tipo} | Capacidade: ${item.capacidade_total} | Status: ${item.status}`
+              }
+            />
+
+            {bancadaSelecionada ? (
+              <Text style={styles.selecionado}>
+                Tipo de ocupação:{" "}
+                {bancadaSelecionada.tipo === "bercario"
+                  ? "bercario"
+                  : "entrada_direta_final"}
+              </Text>
+            ) : null}
+
+            <Text style={styles.label}>Quantidade alocada</Text>
+            <TextInput
+              style={styles.input}
+              value={quantidadeAlocada}
+              onChangeText={setQuantidadeAlocada}
+              keyboardType="numeric"
+            />
+
+            <Text style={styles.label}>Posição inicial</Text>
+            <TextInput
+              style={styles.input}
+              value={posicaoInicial}
+              onChangeText={setPosicaoInicial}
+              keyboardType="numeric"
+            />
+
+            <Text style={styles.label}>Posição final</Text>
+            <TextInput
+              style={styles.input}
+              value={posicaoFinal}
+              onChangeText={setPosicaoFinal}
+              keyboardType="numeric"
+            />
+
+            <DatePickerField
+              label="Data de início"
+              value={dataInicioOcupacao}
+              onChange={setDataInicioOcupacao}
+              placeholder="Selecionar data"
+            />
+
+            <Button title="Ocupar agora" onPress={handleOcuparAgora} />
+            <View style={{ height: 10 }} />
+            <Button title="Deixar para depois" onPress={fecharModalSemOcupar} />
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -266,6 +458,12 @@ const styles = StyleSheet.create({
   },
   titulo: {
     fontSize: 24,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 16
+  },
+  tituloModal: {
+    fontSize: 20,
     fontWeight: "bold",
     textAlign: "center",
     marginBottom: 16
@@ -334,6 +532,20 @@ const styles = StyleSheet.create({
   cardTitulo: {
     fontWeight: "bold",
     fontSize: 16,
+    marginBottom: 4
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    padding: 16
+  },
+  modal: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 20
+  },
+  modalTexto: {
     marginBottom: 4
   }
 });

@@ -1,204 +1,296 @@
-import React, { useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
+  Button,
   ScrollView,
+  StyleSheet,
+  Text,
   TextInput,
-  Button
+  TouchableOpacity,
+  View
 } from "react-native";
-import { buscarAuditoria } from "../services/historicoService";
+import {
+  buscarAuditoriaCompletaPorLote,
+  listarLotesParaAuditoria
+} from "../services/auditoriaService";
+import {
+  compartilharPdfAuditoria,
+  gerarPdfAuditoriaPorLote
+} from "../services/relatorioAuditoriaService";
 
 export default function HistoricoScreen() {
-  const [termoLoteProducao, setTermoLoteProducao] = useState("");
-  const [termoLoteComercial, setTermoLoteComercial] = useState("");
-  const [termoCliente, setTermoCliente] = useState("");
-  const [relatorios, setRelatorios] = useState([]);
+  const [lotes, setLotes] = useState([]);
+  const [busca, setBusca] = useState("");
+  const [loteSelecionadoId, setLoteSelecionadoId] = useState("");
+  const [auditoria, setAuditoria] = useState(null);
+  const [carregando, setCarregando] = useState(false);
+  const [gerandoPdf, setGerandoPdf] = useState(false);
 
-  async function handleBuscar() {
+  useEffect(() => {
+    carregarLotes();
+  }, []);
+
+  async function carregarLotes() {
     try {
-      const resultado = await buscarAuditoria({
-        termoLoteProducao,
-        termoLoteComercial,
-        termoCliente
-      });
-
-      setRelatorios(resultado);
+      const lista = await listarLotesParaAuditoria();
+      setLotes(lista);
     } catch (error) {
       alert(error.message);
     }
   }
 
-  function limparBusca() {
-    setTermoLoteProducao("");
-    setTermoLoteComercial("");
-    setTermoCliente("");
-    setRelatorios([]);
+  async function abrirAuditoria(loteId) {
+    try {
+      setCarregando(true);
+      setLoteSelecionadoId(loteId);
+
+      const resultado = await buscarAuditoriaCompletaPorLote(loteId);
+      setAuditoria(resultado);
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setCarregando(false);
+    }
   }
+
+  async function handleGerarPdf() {
+    try {
+      if (!loteSelecionadoId) {
+        alert("Selecione um lote primeiro.");
+        return;
+      }
+
+      setGerandoPdf(true);
+
+      const resultado = await gerarPdfAuditoriaPorLote(loteSelecionadoId);
+      alert(`PDF gerado com sucesso!\nArquivo: ${resultado.uri}`);
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setGerandoPdf(false);
+    }
+  }
+
+  async function handleCompartilharPdf() {
+    try {
+      if (!loteSelecionadoId) {
+        alert("Selecione um lote primeiro.");
+        return;
+      }
+
+      setGerandoPdf(true);
+
+      const resultado = await gerarPdfAuditoriaPorLote(loteSelecionadoId);
+      await compartilharPdfAuditoria(resultado.uri);
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setGerandoPdf(false);
+    }
+  }
+
+  const lotesFiltrados = lotes.filter((item) => {
+    const termo = busca.trim().toLowerCase();
+    if (!termo) return true;
+
+    return (
+      (item.codigo_lote || "").toLowerCase().includes(termo) ||
+      (item.variedade_nome || "").toLowerCase().includes(termo)
+    );
+  });
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.titulo}>Histórico / Auditoria</Text>
-      <Text style={styles.subtitulo}>
-        Consulte a rastreabilidade completa da produção e da venda.
-      </Text>
 
-      <Text style={styles.label}>Buscar por lote de produção</Text>
+      <Text style={styles.label}>Buscar lote</Text>
       <TextInput
         style={styles.input}
-        value={termoLoteProducao}
-        onChangeText={setTermoLoteProducao}
-        placeholder="Ex: LOT-20260310-ALFACE..."
+        value={busca}
+        onChangeText={setBusca}
+        placeholder="Ex: LOT-20260319... ou Crespa"
       />
 
-      <Text style={styles.label}>Buscar por lote comercial</Text>
-      <TextInput
-        style={styles.input}
-        value={termoLoteComercial}
-        onChangeText={setTermoLoteComercial}
-        placeholder="Ex: LCOM-20260320-001"
-      />
+      <Text style={styles.subtitulo}>Lotes</Text>
+      {lotesFiltrados.map((item) => (
+        <TouchableOpacity
+          key={item.id}
+          style={[
+            styles.card,
+            loteSelecionadoId === item.id && styles.cardSelecionado
+          ]}
+          onPress={() => abrirAuditoria(item.id)}
+        >
+          <Text style={styles.cardTitulo}>{item.codigo_lote}</Text>
+          <Text>Variedade: {item.variedade_nome}</Text>
+          <Text>Data: {item.data_formacao}</Text>
+          <Text>Status: {item.status}</Text>
+        </TouchableOpacity>
+      ))}
 
-      <Text style={styles.label}>Buscar por cliente</Text>
-      <TextInput
-        style={styles.input}
-        value={termoCliente}
-        onChangeText={setTermoCliente}
-        placeholder="Ex: Mercado X"
-      />
+      {carregando && <Text style={styles.aviso}>Carregando auditoria...</Text>}
 
-      <Button title="Buscar auditoria" onPress={handleBuscar} />
-      <View style={{ height: 10 }} />
-      <Button title="Limpar" onPress={limparBusca} />
+      {auditoria && (
+        <>
+          <View style={styles.linhaBotoes}>
+            <View style={styles.botaoAcao}>
+              <Button
+                title={gerandoPdf ? "Gerando PDF..." : "Gerar PDF"}
+                onPress={handleGerarPdf}
+                disabled={gerandoPdf}
+              />
+            </View>
 
-      <Text style={styles.secao}>Resultados</Text>
-
-      {relatorios.length === 0 ? (
-        <Text style={styles.aviso}>Nenhum resultado carregado.</Text>
-      ) : (
-        relatorios.map((relatorio) => (
-          <View
-            key={relatorio.lote_producao.id}
-            style={styles.cardPrincipal}
-          >
-            <Text style={styles.cardTitulo}>
-              {relatorio.lote_producao.codigo_lote}
-            </Text>
-            <Text>Status do lote: {relatorio.lote_producao.status}</Text>
-            <Text>Tipo do lote: {relatorio.lote_producao.tipo_lote}</Text>
-            <Text>Quantidade inicial: {relatorio.lote_producao.quantidade_inicial}</Text>
-            <Text>Quantidade atual: {relatorio.lote_producao.quantidade_atual}</Text>
-
-            <Text style={styles.subsecao}>Origem</Text>
-            <Text>Entrada ID: {relatorio.entrada?.id || "-"}</Text>
-            <Text>Data de entrada: {relatorio.entrada?.data_entrada || "-"}</Text>
-            <Text>Fornecedor: {relatorio.fornecedor?.nome || "-"}</Text>
-            <Text>Variedade: {relatorio.variedade?.nome || relatorio.lote_producao.variedade_nome || "-"}</Text>
-            <Text>Lote do fornecedor: {relatorio.entrada?.lote_fornecedor || "-"}</Text>
-
-            <Text style={styles.subsecao}>Ocupações</Text>
-            {relatorio.ocupacoes.length === 0 ? (
-              <Text style={styles.textoVazio}>Nenhuma ocupação.</Text>
-            ) : (
-              relatorio.ocupacoes.map((item) => (
-                <View key={item.id} style={styles.blocoInterno}>
-                  <Text>ID: {item.id}</Text>
-                  <Text>Bancada ID: {item.bancada_id}</Text>
-                  <Text>Posição: {item.posicao_inicial} até {item.posicao_final}</Text>
-                  <Text>Quantidade: {item.quantidade_alocada}</Text>
-                  <Text>Data início: {item.data_inicio}</Text>
-                  <Text>Data fim: {item.data_fim || "-"}</Text>
-                  <Text>Tipo: {item.tipo_ocupacao}</Text>
-                  <Text>Status: {item.status}</Text>
-                  <Text>Origem da ocupação: {item.ocupacao_origem_id || "-"}</Text>
-                </View>
-              ))
-            )}
-
-            <Text style={styles.subsecao}>Monitoramentos</Text>
-            {relatorio.monitoramentos.length === 0 ? (
-              <Text style={styles.textoVazio}>Nenhum monitoramento.</Text>
-            ) : (
-              relatorio.monitoramentos.map((item) => (
-                <View key={item.id} style={styles.blocoInterno}>
-                  <Text>Data/hora: {item.data_hora}</Text>
-                  <Text>Bancada ID: {item.bancada_id}</Text>
-                  <Text>pH: {item.ph}</Text>
-                  <Text>CE: {item.ce}</Text>
-                  <Text>Temperatura água: {item.temperatura_agua ?? "-"}</Text>
-                  <Text>Obs.: {item.observacoes || "-"}</Text>
-                </View>
-              ))
-            )}
-
-            <Text style={styles.subsecao}>Ocorrências</Text>
-            {relatorio.ocorrencias.length === 0 ? (
-              <Text style={styles.textoVazio}>Nenhuma ocorrência.</Text>
-            ) : (
-              relatorio.ocorrencias.map((item) => (
-                <View key={item.id} style={styles.blocoInterno}>
-                  <Text>Tipo: {item.tipo_ocorrencia}</Text>
-                  <Text>Data/hora: {item.data_hora}</Text>
-                  <Text>Descrição: {item.descricao}</Text>
-                  <Text>Ação corretiva: {item.acao_corretiva || "-"}</Text>
-                  <Text>Status: {item.status}</Text>
-                </View>
-              ))
-            )}
-
-            <Text style={styles.subsecao}>Colheitas</Text>
-            {relatorio.colheitas.length === 0 ? (
-              <Text style={styles.textoVazio}>Nenhuma colheita.</Text>
-            ) : (
-              relatorio.colheitas.map((item) => (
-                <View key={item.id} style={styles.blocoInterno}>
-                  <Text>ID: {item.id}</Text>
-                  <Text>Data: {item.data_colheita}</Text>
-                  <Text>Qtd. colhida: {item.quantidade_colhida}</Text>
-                  <Text>Qtd. perda: {item.quantidade_perda}</Text>
-                  <Text>Tipo: {item.tipo_colheita}</Text>
-                </View>
-              ))
-            )}
-
-            <Text style={styles.subsecao}>Lotes comerciais</Text>
-            {relatorio.lotes_comerciais.length === 0 ? (
-              <Text style={styles.textoVazio}>Nenhum lote comercial.</Text>
-            ) : (
-              relatorio.lotes_comerciais.map((item) => (
-                <View key={item.id} style={styles.blocoInterno}>
-                  <Text>Código: {item.codigo_lote_comercial}</Text>
-                  <Text>Data formação: {item.data_formacao}</Text>
-                  <Text>Qtd. inicial: {item.quantidade_inicial}</Text>
-                  <Text>Qtd. disponível: {item.quantidade_disponivel}</Text>
-                  <Text>Status: {item.status}</Text>
-                </View>
-              ))
-            )}
-
-            <Text style={styles.subsecao}>Destino / vendas</Text>
-            {relatorio.destinos.length === 0 ? (
-              <Text style={styles.textoVazio}>Nenhuma venda encontrada.</Text>
-            ) : (
-              relatorio.destinos.map((destino) => (
-                <View key={destino.pedido.id} style={styles.blocoInterno}>
-                  <Text>Pedido: {destino.pedido.id}</Text>
-                  <Text>Cliente: {destino.cliente?.nome || destino.pedido.cliente_nome || "-"}</Text>
-                  <Text>Data venda: {destino.pedido.data_venda}</Text>
-                  <Text>Status pedido: {destino.pedido.status}</Text>
-
-                  {destino.itens.map((item) => (
-                    <View key={item.id} style={styles.itemInterno}>
-                      <Text>Lote comercial: {item.codigo_lote_comercial}</Text>
-                      <Text>Quantidade: {item.quantidade}</Text>
-                      <Text>Preço unitário: {item.preco_unitario}</Text>
-                    </View>
-                  ))}
-                </View>
-              ))
-            )}
+            <View style={styles.botaoAcao}>
+              <Button
+                title={gerandoPdf ? "Compartilhando..." : "Compartilhar PDF"}
+                onPress={handleCompartilharPdf}
+                disabled={gerandoPdf}
+              />
+            </View>
           </View>
-        ))
+
+          <Text style={styles.subtitulo}>Origem</Text>
+          <View style={styles.cardDestaque}>
+            <Text style={styles.cardTitulo}>{auditoria.lote.codigo_lote}</Text>
+            <Text>Variedade: {auditoria.lote.variedade_nome}</Text>
+            <Text>Data formação: {auditoria.lote.data_formacao}</Text>
+            <Text>Quantidade inicial: {auditoria.lote.quantidade_inicial}</Text>
+            <Text>
+              Saldo disponível para ocupar:{" "}
+              {auditoria.lote.saldo_disponivel_para_ocupar ??
+                auditoria.lote.quantidade_atual}
+            </Text>
+            <Text>Entrada: {auditoria.entrada?.id || "-"}</Text>
+            <Text>Fornecedor: {auditoria.fornecedor?.nome || "-"}</Text>
+            <Text>Data entrada: {auditoria.entrada?.data_entrada || "-"}</Text>
+            <Text>Lote fornecedor: {auditoria.entrada?.lote_fornecedor || "-"}</Text>
+          </View>
+
+          <Text style={styles.subtitulo}>Ocupações</Text>
+          {auditoria.ocupacoes.length === 0 ? (
+            <Text style={styles.aviso}>Nenhuma ocupação encontrada.</Text>
+          ) : (
+            auditoria.ocupacoes.map((item) => (
+              <View key={item.id} style={styles.card}>
+                <Text style={styles.cardTitulo}>{item.id}</Text>
+                <Text>Bancada: {item.bancada?.codigo || item.bancada_id}</Text>
+                <Text>Tipo bancada: {item.bancada?.tipo || "-"}</Text>
+                <Text>
+                  Faixa: {item.posicao_inicial} até {item.posicao_final}
+                </Text>
+                <Text>Quantidade: {item.quantidade_alocada}</Text>
+                <Text>Data início: {item.data_inicio}</Text>
+                <Text>Data fim: {item.data_fim || "-"}</Text>
+                <Text>Tipo ocupação: {item.tipo_ocupacao}</Text>
+                <Text>Status: {item.status}</Text>
+              </View>
+            ))
+          )}
+
+          <Text style={styles.subtitulo}>Movimentações</Text>
+          {auditoria.movimentacoes.length === 0 ? (
+            <Text style={styles.aviso}>Nenhuma movimentação encontrada.</Text>
+          ) : (
+            auditoria.movimentacoes.map((item) => (
+              <View key={item.id} style={styles.card}>
+                <Text style={styles.cardTitulo}>{item.id}</Text>
+                <Text>Tipo: {item.tipo_movimentacao}</Text>
+                <Text>Quantidade: {item.quantidade_movimentada}</Text>
+                <Text>Data: {item.data_movimentacao}</Text>
+                <Text>Bancada origem: {item.bancada_origem_id || "-"}</Text>
+                <Text>Bancada destino: {item.bancada_destino_id || "-"}</Text>
+                <Text>Ocupação origem: {item.ocupacao_origem_id || "-"}</Text>
+                <Text>Ocupação destino: {item.ocupacao_destino_id || "-"}</Text>
+              </View>
+            ))
+          )}
+
+          <Text style={styles.subtitulo}>Monitoramentos</Text>
+          {auditoria.monitoramentos.length === 0 ? (
+            <Text style={styles.aviso}>Nenhum monitoramento encontrado.</Text>
+          ) : (
+            auditoria.monitoramentos.map((item) => (
+              <View key={item.id} style={styles.card}>
+                <Text style={styles.cardTitulo}>{item.data_hora}</Text>
+                <Text>Bancada: {item.bancada_id}</Text>
+                <Text>pH: {item.ph}</Text>
+                <Text>CE: {item.ce}</Text>
+                <Text>Temperatura: {item.temperatura_agua ?? "-"}</Text>
+                <Text>Obs.: {item.observacoes || "-"}</Text>
+              </View>
+            ))
+          )}
+
+          <Text style={styles.subtitulo}>Ocorrências</Text>
+          {auditoria.ocorrencias.length === 0 ? (
+            <Text style={styles.aviso}>Nenhuma ocorrência encontrada.</Text>
+          ) : (
+            auditoria.ocorrencias.map((item) => (
+              <View key={item.id} style={styles.card}>
+                <Text style={styles.cardTitulo}>{item.tipo_ocorrencia}</Text>
+                <Text>Ocupação: {item.ocupacao_bancada_id}</Text>
+                <Text>Descrição: {item.descricao}</Text>
+                <Text>Ação corretiva: {item.acao_corretiva || "-"}</Text>
+                <Text>Data/hora: {item.data_hora}</Text>
+                <Text>Status: {item.status}</Text>
+              </View>
+            ))
+          )}
+
+          <Text style={styles.subtitulo}>Colheitas</Text>
+          {auditoria.colheitas.length === 0 ? (
+            <Text style={styles.aviso}>Nenhuma colheita encontrada.</Text>
+          ) : (
+            auditoria.colheitas.map((item) => (
+              <View key={item.id} style={styles.card}>
+                <Text style={styles.cardTitulo}>{item.id}</Text>
+                <Text>Data colheita: {item.data_colheita}</Text>
+                <Text>Ocupação: {item.ocupacao_bancada_id}</Text>
+                <Text>Quantidade colhida: {item.quantidade_colhida}</Text>
+                <Text>Quantidade perda: {item.quantidade_perda}</Text>
+                <Text>Tipo: {item.tipo_colheita}</Text>
+              </View>
+            ))
+          )}
+
+          <Text style={styles.subtitulo}>Lotes comerciais</Text>
+          {auditoria.lotes_comerciais.length === 0 ? (
+            <Text style={styles.aviso}>Nenhum lote comercial encontrado.</Text>
+          ) : (
+            auditoria.lotes_comerciais.map((item) => (
+              <View key={item.id} style={styles.card}>
+                <Text style={styles.cardTitulo}>{item.codigo_lote_comercial}</Text>
+                <Text>Data formação: {item.data_formacao}</Text>
+                <Text>Quantidade inicial: {item.quantidade_inicial}</Text>
+                <Text>Quantidade disponível: {item.quantidade_disponivel}</Text>
+                <Text>Status: {item.status}</Text>
+              </View>
+            ))
+          )}
+
+          <Text style={styles.subtitulo}>Vendas</Text>
+          {auditoria.pedidos.length === 0 ? (
+            <Text style={styles.aviso}>Nenhuma venda encontrada.</Text>
+          ) : (
+            auditoria.pedidos.map((pedido) => (
+              <View key={pedido.id} style={styles.card}>
+                <Text style={styles.cardTitulo}>{pedido.id}</Text>
+                <Text>Cliente: {pedido.cliente_nome}</Text>
+                <Text>Data venda: {pedido.data_venda}</Text>
+                <Text>Status: {pedido.status}</Text>
+
+                <Text style={styles.subItemTitulo}>Itens</Text>
+                {pedido.itens.map((item) => (
+                  <View key={item.id} style={styles.itemBox}>
+                    <Text>Lote comercial: {item.codigo_lote_comercial}</Text>
+                    <Text>Quantidade: {item.quantidade}</Text>
+                    <Text>Preço unitário: {item.preco_unitario}</Text>
+                  </View>
+                ))}
+              </View>
+            ))
+          )}
+        </>
       )}
     </ScrollView>
   );
@@ -212,16 +304,16 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "bold",
     textAlign: "center",
-    marginBottom: 6
+    marginBottom: 16
   },
   subtitulo: {
-    textAlign: "center",
-    color: "#555",
-    marginBottom: 20
+    fontSize: 18,
+    fontWeight: "bold",
+    marginTop: 24,
+    marginBottom: 12
   },
   label: {
     fontWeight: "bold",
-    marginTop: 10,
     marginBottom: 6
   },
   input: {
@@ -229,52 +321,52 @@ const styles = StyleSheet.create({
     borderColor: "#999",
     borderRadius: 8,
     padding: 10,
-    marginBottom: 8
-  },
-  secao: {
-    fontSize: 18,
-    fontWeight: "bold",
-    marginTop: 20,
     marginBottom: 10
   },
   aviso: {
-    color: "#666"
+    color: "#666",
+    marginBottom: 8
   },
-  cardPrincipal: {
+  card: {
     borderWidth: 1,
     borderColor: "#ccc",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 14,
-    backgroundColor: "#fff"
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10
+  },
+  cardSelecionado: {
+    borderColor: "#2e86de",
+    backgroundColor: "#eaf3ff"
+  },
+  cardDestaque: {
+    borderWidth: 1,
+    borderColor: "#7fb3d5",
+    backgroundColor: "#eef7fc",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10
   },
   cardTitulo: {
-    fontSize: 18,
     fontWeight: "bold",
-    marginBottom: 8
-  },
-  subsecao: {
     fontSize: 16,
+    marginBottom: 4
+  },
+  subItemTitulo: {
     fontWeight: "bold",
-    marginTop: 14,
-    marginBottom: 8
-  },
-  blocoInterno: {
-    borderWidth: 1,
-    borderColor: "#e1e4e8",
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 8,
-    backgroundColor: "#fafafa"
-  },
-  itemInterno: {
-    marginTop: 8,
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: "#f0f3f4"
-  },
-  textoVazio: {
-    color: "#666",
+    marginTop: 10,
     marginBottom: 6
+  },
+  itemBox: {
+    backgroundColor: "#f8f9f9",
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 6
+  },
+  linhaBotoes: {
+    flexDirection: "row",
+    marginBottom: 12
+  },
+  botaoAcao: {
+    marginRight: 10
   }
 });

@@ -1,47 +1,47 @@
-import React, { useEffect, useMemo, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Modal,
-  Button,
-  TextInput,
-  Switch
-} from "react-native";
 import { get, ref } from "firebase/database";
-import { db } from "../config/firebaseConfig";
+import { useEffect, useMemo, useState } from "react";
 import {
-  listarOcupacoesAtivasPorBancada,
-  registrarOcupacaoBancada,
-  encerrarOcupacaoBancada,
-  transplantarParaOutraBancada
-} from "../services/ocupacaoService";
-import { validarDataISO } from "../services/entradaService";
-import {
-  registrarMonitoramento,
-  listarMonitoramentosPorBancada
-} from "../services/monitoramentoService";
-import {
-  registrarOcorrencia,
-  listarOcorrenciasPorOcupacao,
-  resolverOcorrencia
-} from "../services/ocorrenciaService";
-import {
-  colherOcupacao,
-  listarColheitasPorOcupacao
-} from "../services/colheitaService";
-import {
-  calcularResumoCapacidade,
-  sugerirProximaFaixaLivre
-} from "../services/faixaBancadaService";
-import { calcularResumoLotes } from "../services/saldoLoteService";
+  Button,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
+} from "react-native";
+import BancadaFaixaBar from "../components/BancadaFaixaBar";
 import DatePickerField from "../components/DatePickerField";
 import DateTimePickerField from "../components/DateTimePickerField";
 import OptionSelectField from "../components/OptionSelectField";
 import SelectCardList from "../components/SelectCardList";
-import BancadaFaixaBar from "../components/BancadaFaixaBar";
+import { db } from "../config/firebaseConfig";
+import {
+  colherOcupacao,
+  listarColheitasPorOcupacao
+} from "../services/colheitaService";
+import { validarDataISO } from "../services/entradaService";
+import {
+  calcularResumoCapacidade,
+  sugerirProximaFaixaLivre
+} from "../services/faixaBancadaService";
+import {
+  listarMonitoramentosPorBancada,
+  registrarMonitoramento
+} from "../services/monitoramentoService";
+import {
+  listarOcorrenciasPorOcupacao,
+  registrarOcorrencia,
+  resolverOcorrencia
+} from "../services/ocorrenciaService";
+import {
+  encerrarOcupacaoBancada,
+  listarOcupacoesAtivasPorBancada,
+  registrarOcupacaoBancada,
+  transplantarParaOutraBancada
+} from "../services/ocupacaoService";
+import { calcularResumoLotes } from "../services/saldoLoteService";
 
 export default function DashboardScreen() {
   const [bancadas, setBancadas] = useState([]);
@@ -89,10 +89,12 @@ export default function DashboardScreen() {
   const [quantidadePerda, setQuantidadePerda] = useState("");
   const [tipoColheita, setTipoColheita] = useState("parcial");
 
-  const OPCOES_TIPO_OCUPACAO = [
-    { label: "Berçário", value: "bercario" },
-    { label: "Transplante", value: "transplante" },
-    { label: "Plantio direto", value: "plantio_direto" }
+  const OPCOES_TIPO_OCUPACAO_BERCARIO = [
+    { label: "Berçário", value: "bercario" }
+  ];
+
+  const OPCOES_TIPO_OCUPACAO_FINAL = [
+    { label: "Entrada direta final", value: "entrada_direta_final" }
   ];
 
   const OPCOES_TIPO_OCORRENCIA = [
@@ -127,6 +129,7 @@ export default function DashboardScreen() {
 
     if (sugestao) {
       setPosicaoInicial(String(sugestao.inicio));
+
       if (quantidadeAlocada && Number(quantidadeAlocada) > 0) {
         const qtd = Number(quantidadeAlocada);
         const fimCalculado = sugestao.inicio + qtd - 1;
@@ -149,28 +152,11 @@ export default function DashboardScreen() {
     );
   }, [bancadaSelecionada, ocupacoesAtivasBancada]);
 
-  function obterTiposDestinoPreferenciais() {
+  const tiposDestinoPreferenciais = useMemo(() => {
     const tipoOrigem = (bancadaSelecionada?.tipo || "").toLowerCase();
-
-    if (tipoOrigem === "bercario") return ["engorda"];
-    if (tipoOrigem === "engorda") return ["final"];
-    if (tipoOrigem === "final") return [];
+    if (tipoOrigem === "bercario") return ["final"];
     return [];
-  }
-
-  function obterDescricaoFluxo() {
-    const tipoOrigem = (bancadaSelecionada?.tipo || "").toLowerCase();
-
-    if (tipoOrigem === "bercario") return "Fluxo sugerido: berçário → engorda";
-    if (tipoOrigem === "engorda") return "Fluxo sugerido: engorda → final";
-    if (tipoOrigem === "final") return "Bancada final: sem próxima etapa preferencial";
-    return "Sem fluxo sugerido";
-  }
-
-  const tiposDestinoPreferenciais = useMemo(
-    () => obterTiposDestinoPreferenciais(),
-    [bancadaSelecionada]
-  );
+  }, [bancadaSelecionada]);
 
   const bancadasDestinoFiltradas = useMemo(() => {
     const termo = buscaBancadaDestino.trim().toLowerCase();
@@ -202,13 +188,11 @@ export default function DashboardScreen() {
 
         const diffCompat =
           prioridadeCompatibilidade(a) - prioridadeCompatibilidade(b);
-
         if (diffCompat !== 0) return diffCompat;
 
         const diffStatus =
           prioridadeStatus((a.status || "").toLowerCase()) -
           prioridadeStatus((b.status || "").toLowerCase());
-
         if (diffStatus !== 0) return diffStatus;
 
         return (a.codigo || "").localeCompare(b.codigo || "");
@@ -223,6 +207,13 @@ export default function DashboardScreen() {
 
   function obterLotePorId(id) {
     return lotesAtivos.find((item) => item.id === id) || null;
+  }
+
+  function obterDescricaoFluxo() {
+    const tipoOrigem = (bancadaSelecionada?.tipo || "").toLowerCase();
+    if (tipoOrigem === "bercario") return "Fluxo sugerido: berçário → final";
+    if (tipoOrigem === "final") return "Bancada final";
+    return "";
   }
 
   async function carregarTudo() {
@@ -282,7 +273,9 @@ export default function DashboardScreen() {
       setPosicaoFinal("");
       setQuantidadeAlocada("");
       setDataInicio("");
-      setTipoOcupacao(bancada.tipo === "bercario" ? "bercario" : "transplante");
+      setTipoOcupacao(
+        bancada.tipo === "bercario" ? "bercario" : "entrada_direta_final"
+      );
 
       setDataHoraMonitoramento("");
       setPh("");
@@ -344,8 +337,7 @@ export default function DashboardScreen() {
 
     if (statusNormalizado === "ocupada") {
       if (tipoNormalizado === "bercario") return "#f4d03f";
-      if (tipoNormalizado === "engorda") return "#82e0aa";
-      if (tipoNormalizado === "final") return "#196f3d";
+      if (tipoNormalizado === "final") return "#58d68d";
       return "#58d68d";
     }
 
@@ -510,7 +502,7 @@ export default function DashboardScreen() {
       });
 
       alert(
-        `Transplante realizado com sucesso!\n\nSublote criado: ${resultado.sublote.codigo_lote}\nNova ocupação: ${resultado.nova_ocupacao.id}`
+        `Transplante realizado com sucesso!\n\nNova ocupação: ${resultado.nova_ocupacao.id}`
       );
 
       setBancadaDestinoId("");
@@ -676,8 +668,7 @@ export default function DashboardScreen() {
         <Text style={styles.legendaTitulo}>Legenda</Text>
         <Text>Cinza: vazia</Text>
         <Text>Amarelo: berçário ocupado</Text>
-        <Text>Verde claro: engorda ocupada</Text>
-        <Text>Verde escuro: final ocupada</Text>
+        <Text>Verde: final ocupado</Text>
         <Text>Vermelho: alerta</Text>
       </View>
 
@@ -863,7 +854,11 @@ export default function DashboardScreen() {
                 label="Tipo de ocupação"
                 value={tipoOcupacao}
                 onChange={setTipoOcupacao}
-                options={OPCOES_TIPO_OCUPACAO}
+                options={
+                  (bancadaSelecionada?.tipo || "").toLowerCase() === "bercario"
+                    ? OPCOES_TIPO_OCUPACAO_BERCARIO
+                    : OPCOES_TIPO_OCUPACAO_FINAL
+                }
               />
 
               <Button title="Registrar ocupação" onPress={handleRegistrarOcupacao} />
@@ -993,104 +988,106 @@ export default function DashboardScreen() {
                     ))
                   )}
 
-                  <Text style={styles.subsecao}>Transplante / sublote</Text>
+                  {(bancadaSelecionada?.tipo || "").toLowerCase() === "bercario" && (
+                    <>
+                      <Text style={styles.subsecao}>Transplante</Text>
 
-                  <Text style={styles.subsecao}>Origem do transplante</Text>
+                      <View style={styles.cardOrigem}>
+                        <Text style={styles.cardMonitoramentoTitulo}>
+                          Ocupação origem: {ocupacaoSelecionada?.id || "-"}
+                        </Text>
+                        <Text>Lote origem: {ocupacaoSelecionada?.lote_producao_id || "-"}</Text>
+                        <Text>
+                          Variedade: {obterLotePorId(ocupacaoSelecionada?.lote_producao_id)?.variedade_nome || "-"}
+                        </Text>
+                        <Text>
+                          Faixa origem: {ocupacaoSelecionada?.posicao_inicial || "-"} até{" "}
+                          {ocupacaoSelecionada?.posicao_final || "-"}
+                        </Text>
+                        <Text>Quantidade alocada: {ocupacaoSelecionada?.quantidade_alocada || "-"}</Text>
+                        <Text>Tipo ocupação: {ocupacaoSelecionada?.tipo_ocupacao || "-"}</Text>
+                        <Text style={styles.fluxoTexto}>{obterDescricaoFluxo()}</Text>
+                      </View>
 
-                  <View style={styles.cardOrigem}>
-                    <Text style={styles.cardMonitoramentoTitulo}>
-                      Ocupação origem: {ocupacaoSelecionada?.id || "-"}
-                    </Text>
-                    <Text>Lote origem: {ocupacaoSelecionada?.lote_producao_id || "-"}</Text>
-                    <Text>
-                      Variedade: {obterLotePorId(ocupacaoSelecionada?.lote_producao_id)?.variedade_nome || "-"}
-                    </Text>
-                    <Text>
-                      Faixa origem: {ocupacaoSelecionada?.posicao_inicial || "-"} até{" "}
-                      {ocupacaoSelecionada?.posicao_final || "-"}
-                    </Text>
-                    <Text>Quantidade alocada: {ocupacaoSelecionada?.quantidade_alocada || "-"}</Text>
-                    <Text>Tipo ocupação: {ocupacaoSelecionada?.tipo_ocupacao || "-"}</Text>
-                    <Text style={styles.fluxoTexto}>{obterDescricaoFluxo()}</Text>
-                  </View>
+                      <Text style={styles.label}>Buscar bancada destino</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={buscaBancadaDestino}
+                        onChangeText={setBuscaBancadaDestino}
+                        placeholder="Ex: F01, final, vazia..."
+                      />
 
-                  <Text style={styles.label}>Buscar bancada destino</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={buscaBancadaDestino}
-                    onChangeText={setBuscaBancadaDestino}
-                    placeholder="Ex: A13, engorda, vazia..."
-                  />
+                      {!buscaBancadaDestino.trim() && bancadasDestinoFiltradas.length >= 25 ? (
+                        <Text style={styles.aviso}>
+                          Exibindo as 25 primeiras bancadas priorizadas. Digite na busca para refinar.
+                        </Text>
+                      ) : null}
 
-                  {!buscaBancadaDestino.trim() && bancadasDestinoFiltradas.length >= 25 ? (
-                    <Text style={styles.aviso}>
-                      Exibindo as 25 primeiras bancadas priorizadas. Digite na busca para refinar.
-                    </Text>
-                  ) : null}
+                      <SelectCardList
+                        title="Escolha a bancada destino"
+                        items={bancadasDestinoFiltradas}
+                        selectedId={bancadaDestinoId}
+                        onSelect={setBancadaDestinoId}
+                        emptyMessage="Nenhuma bancada encontrada para essa busca."
+                        getTitle={(item) => item.codigo}
+                        getSubtitle={(item) => {
+                          const compativel = tiposDestinoPreferenciais.includes(
+                            (item.tipo || "").toLowerCase()
+                          );
 
-                  <SelectCardList
-                    title="Escolha a bancada destino"
-                    items={bancadasDestinoFiltradas}
-                    selectedId={bancadaDestinoId}
-                    onSelect={setBancadaDestinoId}
-                    emptyMessage="Nenhuma bancada encontrada para essa busca."
-                    getTitle={(item) => item.codigo}
-                    getSubtitle={(item) => {
-                      const compativel = tiposDestinoPreferenciais.includes(
-                        (item.tipo || "").toLowerCase()
-                      );
+                          return `${item.tipo} | Capacidade: ${item.capacidade_total} | Status: ${item.status}${compativel ? " | Recomendado" : ""}`;
+                        }}
+                      />
 
-                      return `${item.tipo} | Capacidade: ${item.capacidade_total} | Status: ${item.status}${compativel ? " | Recomendado" : ""}`;
-                    }}
-                  />
+                      {bancadaDestinoId ? (
+                        <Text style={styles.destaque}>
+                          Bancada destino selecionada:{" "}
+                          {bancadas.find((item) => item.id === bancadaDestinoId)?.codigo || "-"}
+                        </Text>
+                      ) : null}
 
-                  {bancadaDestinoId ? (
-                    <Text style={styles.destaque}>
-                      Bancada destino selecionada:{" "}
-                      {bancadas.find((item) => item.id === bancadaDestinoId)?.codigo || "-"}
-                    </Text>
-                  ) : null}
+                      <Text style={styles.label}>Quantidade transplantada</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={quantidadeTransplantada}
+                        onChangeText={setQuantidadeTransplantada}
+                        keyboardType="numeric"
+                        placeholder="300"
+                      />
 
-                  <Text style={styles.label}>Quantidade transplantada</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={quantidadeTransplantada}
-                    onChangeText={setQuantidadeTransplantada}
-                    keyboardType="numeric"
-                    placeholder="300"
-                  />
+                      <DatePickerField
+                        label="Data do transplante"
+                        value={dataTransplante}
+                        onChange={setDataTransplante}
+                        placeholder="Selecionar data"
+                      />
 
-                  <DatePickerField
-                    label="Data do transplante"
-                    value={dataTransplante}
-                    onChange={setDataTransplante}
-                    placeholder="Selecionar data"
-                  />
+                      <Text style={styles.label}>Posição inicial destino</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={posicaoInicialDestino}
+                        onChangeText={setPosicaoInicialDestino}
+                        keyboardType="numeric"
+                        placeholder="1"
+                      />
 
-                  <Text style={styles.label}>Posição inicial destino</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={posicaoInicialDestino}
-                    onChangeText={setPosicaoInicialDestino}
-                    keyboardType="numeric"
-                    placeholder="1"
-                  />
+                      <Text style={styles.label}>Posição final destino</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={posicaoFinalDestino}
+                        onChangeText={setPosicaoFinalDestino}
+                        keyboardType="numeric"
+                        placeholder="300"
+                      />
 
-                  <Text style={styles.label}>Posição final destino</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={posicaoFinalDestino}
-                    onChangeText={setPosicaoFinalDestino}
-                    keyboardType="numeric"
-                    placeholder="300"
-                  />
+                      <View style={styles.linhaSwitch}>
+                        <Text>Encerrar ocupação de origem</Text>
+                        <Switch value={encerrarOrigem} onValueChange={setEncerrarOrigem} />
+                      </View>
 
-                  <View style={styles.linhaSwitch}>
-                    <Text>Encerrar ocupação de origem</Text>
-                    <Switch value={encerrarOrigem} onValueChange={setEncerrarOrigem} />
-                  </View>
-
-                  <Button title="Realizar transplante" onPress={handleTransplante} />
+                      <Button title="Realizar transplante" onPress={handleTransplante} />
+                    </>
+                  )}
 
                   <Text style={styles.subsecao}>Registrar ocorrência</Text>
 

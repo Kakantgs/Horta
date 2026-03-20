@@ -2,20 +2,13 @@ import { get, ref, update } from "firebase/database";
 import { db } from "../config/firebaseConfig";
 import { gerarId } from "../utils/idGenerator";
 
-function calcularStatusLoteComercial(quantidadeDisponivel) {
-  const qtd = Number(quantidadeDisponivel);
-
-  if (qtd <= 0) return "vendido";
-  return "parcial";
-}
-
 export async function listarClientes() {
   const snapshot = await get(ref(db, "clientes"));
 
   if (!snapshot.exists()) return [];
 
   return Object.values(snapshot.val()).sort((a, b) =>
-    a.nome.localeCompare(b.nome)
+    (a.nome || "").localeCompare(b.nome || "")
   );
 }
 
@@ -26,7 +19,7 @@ export async function listarLotesComerciaisDisponiveis() {
 
   return Object.values(snapshot.val())
     .filter((item) => Number(item.quantidade_disponivel) > 0)
-    .sort((a, b) => b.data_formacao.localeCompare(a.data_formacao));
+    .sort((a, b) => (b.data_formacao || "").localeCompare(a.data_formacao || ""));
 }
 
 export async function registrarVenda({
@@ -36,12 +29,15 @@ export async function registrarVenda({
   preco_unitario,
   data_venda
 }) {
-  const clienteSnapshot = await get(ref(db, `clientes/${cliente_id}`));
+  const [clienteSnapshot, loteSnapshot] = await Promise.all([
+    get(ref(db, `clientes/${cliente_id}`)),
+    get(ref(db, `lotes_comerciais/${lote_comercial_id}`))
+  ]);
+
   if (!clienteSnapshot.exists()) {
     throw new Error("Cliente não encontrado.");
   }
 
-  const loteSnapshot = await get(ref(db, `lotes_comerciais/${lote_comercial_id}`));
   if (!loteSnapshot.exists()) {
     throw new Error("Lote comercial não encontrado.");
   }
@@ -49,10 +45,10 @@ export async function registrarVenda({
   const cliente = clienteSnapshot.val();
   const lote = loteSnapshot.val();
 
-  const qtdVendida = Number(quantidade);
+  const qtd = Number(quantidade);
   const preco = Number(preco_unitario);
 
-  if (qtdVendida <= 0) {
+  if (qtd <= 0) {
     throw new Error("A quantidade vendida deve ser maior que zero.");
   }
 
@@ -60,7 +56,7 @@ export async function registrarVenda({
     throw new Error("O preço unitário não pode ser negativo.");
   }
 
-  if (qtdVendida > Number(lote.quantidade_disponivel)) {
+  if (qtd > Number(lote.quantidade_disponivel)) {
     throw new Error("A quantidade vendida é maior que o saldo disponível do lote comercial.");
   }
 
@@ -80,19 +76,25 @@ export async function registrarVenda({
     pedido_venda_id: pedidoId,
     lote_comercial_id,
     codigo_lote_comercial: lote.codigo_lote_comercial,
-    quantidade: qtdVendida,
+    quantidade: qtd,
     preco_unitario: preco
   };
 
-  const novoSaldo = Number(lote.quantidade_disponivel) - qtdVendida;
-  const novoStatus =
-    novoSaldo === 0 ? "vendido" : calcularStatusLoteComercial(novoSaldo);
+  const novaQuantidadeDisponivel = Number(lote.quantidade_disponivel) - qtd;
+
+  let novoStatusLote = "disponivel";
+  if (novaQuantidadeDisponivel === 0) {
+    novoStatusLote = "vendido";
+  } else if (novaQuantidadeDisponivel < Number(lote.quantidade_inicial)) {
+    novoStatusLote = "parcial";
+  }
 
   const updates = {};
   updates[`pedidos_venda/${pedidoId}`] = novoPedido;
   updates[`itens_pedido_venda/${itemId}`] = novoItem;
-  updates[`lotes_comerciais/${lote_comercial_id}/quantidade_disponivel`] = novoSaldo;
-  updates[`lotes_comerciais/${lote_comercial_id}/status`] = novoStatus;
+  updates[`lotes_comerciais/${lote_comercial_id}/quantidade_disponivel`] =
+    novaQuantidadeDisponivel;
+  updates[`lotes_comerciais/${lote_comercial_id}/status`] = novoStatusLote;
 
   await update(ref(db), updates);
 
@@ -101,8 +103,8 @@ export async function registrarVenda({
     item: novoItem,
     lote_atualizado: {
       ...lote,
-      quantidade_disponivel: novoSaldo,
-      status: novoStatus
+      quantidade_disponivel: novaQuantidadeDisponivel,
+      status: novoStatusLote
     }
   };
 }
@@ -113,7 +115,7 @@ export async function listarPedidosVenda() {
   if (!snapshot.exists()) return [];
 
   return Object.values(snapshot.val()).sort((a, b) =>
-    b.data_venda.localeCompare(a.data_venda)
+    (b.data_venda || "").localeCompare(a.data_venda || "")
   );
 }
 

@@ -1,6 +1,7 @@
 import { ref, get, update } from "firebase/database";
 import { db } from "../config/firebaseConfig";
 import { gerarId } from "../utils/idGenerator";
+import { obterSaldoDisponivelLote } from "./loteFields";
 
 function gerarCodigoLote(variedadeNome, dataEntrada) {
   const dataSemTraco = dataEntrada.replaceAll("-", "");
@@ -17,7 +18,7 @@ function gerarCodigoLote(variedadeNome, dataEntrada) {
 }
 
 function calcularQuantidadeTotal(quantidadeRecebida, unidade) {
-  if (unidade.trim().toLowerCase() === "bandeja") {
+  if ((unidade || "").trim().toLowerCase() === "bandeja") {
     return Number(quantidadeRecebida) * 128;
   }
 
@@ -48,7 +49,8 @@ export async function registrarEntradaComLote({
   quantidade_recebida,
   unidade,
   tipo_origem,
-  lote_fornecedor
+  lote_fornecedor,
+  observacoes = ""
 }) {
   const fornecedorSnapshot = await get(ref(db, `fornecedores/${fornecedor_id}`));
   if (!fornecedorSnapshot.exists()) {
@@ -79,7 +81,8 @@ export async function registrarEntradaComLote({
     quantidade_recebida: Number(quantidade_recebida),
     unidade: unidade.trim().toLowerCase(),
     tipo_origem: tipo_origem.trim().toLowerCase(),
-    lote_fornecedor: lote_fornecedor?.trim() || ""
+    lote_fornecedor: lote_fornecedor?.trim() || "",
+    observacoes: observacoes?.trim() || ""
   };
 
   const novoLote = {
@@ -91,10 +94,15 @@ export async function registrarEntradaComLote({
     variedade_nome: variedade.nome,
     data_formacao: data_entrada,
     quantidade_inicial: quantidadeTotal,
+
+    // NOVO CAMPO OFICIAL
+    saldo_disponivel_para_ocupar: quantidadeTotal,
+
+    // CAMPO LEGADO TEMPORÁRIO PARA NÃO QUEBRAR AINDA
     quantidade_atual: quantidadeTotal,
-    tipo_lote: "principal",
+
     status: "ativo",
-    preparado_para_sublote: true
+    tipo_lote: "principal"
   };
 
   const updates = {};
@@ -124,7 +132,10 @@ export async function listarLotesProducao() {
 
   if (!snapshot.exists()) return [];
 
-  return Object.values(snapshot.val()).sort((a, b) =>
-    b.data_formacao.localeCompare(a.data_formacao)
-  );
+  return Object.values(snapshot.val())
+    .map((item) => ({
+      ...item,
+      saldo_disponivel_para_ocupar: obterSaldoDisponivelLote(item)
+    }))
+    .sort((a, b) => b.data_formacao.localeCompare(a.data_formacao));
 }

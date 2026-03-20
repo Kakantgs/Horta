@@ -1,6 +1,7 @@
 import { get, ref, update } from "firebase/database";
 import { db } from "../config/firebaseConfig";
 import { gerarId } from "../utils/idGenerator";
+import { registrarMovimentacaoLote } from "./movimentacaoService";
 
 function gerarCodigoLoteComercial(dataFormacao) {
   const dataSemTraco = dataFormacao.replaceAll("-", "");
@@ -9,6 +10,57 @@ function gerarCodigoLoteComercial(dataFormacao) {
     .padStart(3, "0");
 
   return `LCOM-${dataSemTraco}-${numero}`;
+}
+
+async function recalcularStatusBancada(bancadaId) {
+  const ocupacoesSnapshot = await get(ref(db, "ocupacoes_bancada"));
+
+  const ocupacoes = ocupacoesSnapshot.exists()
+    ? Object.values(ocupacoesSnapshot.val())
+    : [];
+
+  const ocupacoesAtivas = ocupacoes.filter(
+    (item) => item.bancada_id === bancadaId && item.status === "ativa"
+  );
+
+  await update(ref(db, `bancadas/${bancadaId}`), {
+    status: ocupacoesAtivas.length > 0 ? "ocupada" : "vazia"
+  });
+}
+
+async function recalcularStatusLoteProducao(loteId) {
+  const [loteSnapshot, ocupacoesSnapshot] = await Promise.all([
+    get(ref(db, `lotes_producao/${loteId}`)),
+    get(ref(db, "ocupacoes_bancada"))
+  ]);
+
+  if (!loteSnapshot.exists()) return;
+
+  const lote = loteSnapshot.val();
+
+  const ocupacoes = ocupacoesSnapshot.exists()
+    ? Object.values(ocupacoesSnapshot.val())
+    : [];
+
+  const ocupacoesAtivasDoLote = ocupacoes.filter(
+    (item) => item.lote_producao_id === loteId && item.status === "ativa"
+  );
+
+  const saldoDisponivel = Number(
+    lote.saldo_disponivel_para_ocupar ?? lote.quantidade_atual ?? 0
+  );
+
+  let status = "ativo";
+
+  if (saldoDisponivel === 0 && ocupacoesAtivasDoLote.length > 0) {
+    status = "em_producao";
+  }
+
+  if (saldoDisponivel === 0 && ocupacoesAtivasDoLote.length === 0) {
+    status = "colhido";
+  }
+
+  await update(ref(db, `lotes_producao/${loteId}`), { status });
 }
 
 export async function colherOcupacao({
@@ -43,6 +95,7 @@ export async function colherOcupacao({
   const qtdColhida = Number(quantidade_colhida);
   const qtdPerda = Number(quantidade_perda || 0);
   const qtdTotal = qtdColhida + qtdPerda;
+  const quantidadeAtualOcupacao = Number(ocupacao.quantidade_alocada);
 
   if (qtdColhida <= 0) {
     throw new Error("A quantidade colhida deve ser maior que zero.");
@@ -52,7 +105,7 @@ export async function colherOcupacao({
     throw new Error("A quantidade de perda não pode ser negativa.");
   }
 
-  if (qtdTotal > Number(ocupacao.quantidade_alocada)) {
+  if (qtdTotal > quantidadeAtualOcupacao) {
     throw new Error("Colheita + perda ultrapassa a quantidade alocada na ocupação.");
   }
 
@@ -67,7 +120,7 @@ export async function colherOcupacao({
     data_colheita,
     quantidade_colhida: qtdColhida,
     quantidade_perda: qtdPerda,
-    tipo_colheita: tipo_colheita.trim().toLowerCase()
+    tipo_colheita: (tipo_colheita || "").trim().toLowerCase()
   };
 
   const novoLoteComercial = {
@@ -81,22 +134,41 @@ export async function colherOcupacao({
     status: qtdColhida > 0 ? "disponivel" : "encerrado"
   };
 
-  const novaQuantidadeOcupacao = Number(ocupacao.quantidade_alocada) - qtdTotal;
+  const novaQuantidadeOcupacao = quantidadeAtualOcupacao - qtdTotal;
 
   const updates = {};
   updates[`colheitas/${colheitaId}`] = novaColheita;
   updates[`lotes_comerciais/${loteComercialId}`] = novoLoteComercial;
 
-  if (tipo_colheita.trim().toLowerCase() === "total" || novaQuantidadeOcupacao === 0) {
+  if (
+    (tipo_colheita || "").trim().toLowerCase() === "total" ||
+    novaQuantidadeOcupacao === 0
+  ) {
     updates[`ocupacoes_bancada/${ocupacao_bancada_id}/status`] = "encerrada";
     updates[`ocupacoes_bancada/${ocupacao_bancada_id}/data_fim`] = data_colheita;
-    updates[`bancadas/${ocupacao.bancada_id}/status`] = "vazia";
   } else {
     updates[`ocupacoes_bancada/${ocupacao_bancada_id}/quantidade_alocada`] =
       novaQuantidadeOcupacao;
   }
 
   await update(ref(db), updates);
+
+  await registrarMovimentacaoLote({
+    lote_producao_id: ocupacao.lote_producao_id,
+    ocupacao_origem_id: ocupacao_bancada_id,
+    ocupacao_destino_id: null,
+    bancada_origem_id: ocupacao.bancada_id,
+    bancada_destino_id: null,
+    quantidade_movimentada: qtdTotal,
+    data_movimentacao: data_colheita,
+    tipo_movimentacao:
+      (tipo_colheita || "").trim().toLowerCase() === "total"
+        ? "colheita_total"
+        : "colheita_parcial"
+  });
+
+  await recalcularStatusBancada(ocupacao.bancada_id);
+  await recalcularStatusLoteProducao(ocupacao.lote_producao_id);
 
   return {
     colheita: novaColheita,
@@ -137,9 +209,7 @@ export async function listarLotesComerciais() {
 export async function buscarLoteComercialPorId(id) {
   const snapshot = await get(ref(db, `lotes_comerciais/${id}`));
 
-  if (!snapshot.exists()) {
-    return null;
-  }
+  if (!snapshot.exists()) return null;
 
   return snapshot.val();
 }
