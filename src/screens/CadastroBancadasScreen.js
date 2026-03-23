@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   FlatList,
@@ -9,20 +9,29 @@ import {
   View
 } from "react-native";
 import OptionSelectField from "../components/OptionSelectField";
+import SelectCardList from "../components/SelectCardList";
 import {
   atualizarBancada,
   criarBancada,
+  criarMultiplasBancadas,
   excluirBancada,
   listarBancadas
 } from "../services/bancadaService";
+import { listarSetores } from "../services/setorService";
 
 export default function CadastroBancadasScreen({ onVoltar }) {
-  const [codigo, setCodigo] = useState("");
+  const [setores, setSetores] = useState([]);
+  const [setorId, setSetorId] = useState("");
   const [tipo, setTipo] = useState("bercario");
   const [capacidadeTotal, setCapacidadeTotal] = useState("");
   const [status, setStatus] = useState("vazia");
   const [x, setX] = useState("");
   const [y, setY] = useState("");
+
+  const [modoLote, setModoLote] = useState(false);
+  const [quantidadeLote, setQuantidadeLote] = useState("1");
+  const [eixoIncremento, setEixoIncremento] = useState("x");
+
   const [bancadas, setBancadas] = useState([]);
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -47,43 +56,76 @@ export default function CadastroBancadasScreen({ onVoltar }) {
     { label: "Inativa", value: "inativa" }
   ];
 
+  const OPCOES_EIXO = [
+    { label: "Incrementar no X", value: "x" },
+    { label: "Incrementar no Y", value: "y" }
+  ];
+
   useEffect(() => {
     carregar();
   }, []);
 
   async function carregar() {
     try {
-      const lista = await listarBancadas();
-      setBancadas(lista);
+      const [listaBancadas, listaSetores] = await Promise.all([
+        listarBancadas(),
+        listarSetores()
+      ]);
+
+      setBancadas(listaBancadas);
+      setSetores(listaSetores.filter((item) => item.ativo));
     } catch (error) {
       alert(error.message);
     }
   }
 
+  const setorSelecionado = useMemo(
+    () => setores.find((item) => item.id === setorId) || null,
+    [setores, setorId]
+  );
+
   async function handleCriar() {
     try {
-      if (!codigo || !tipo || !capacidadeTotal || x === "" || y === "") {
+      if (!setorId || !tipo || !capacidadeTotal || x === "" || y === "") {
         alert("Preencha os campos obrigatórios.");
         return;
       }
 
-      await criarBancada({
-        codigo,
-        tipo,
-        capacidade_total: capacidadeTotal,
-        status,
-        x,
-        y
-      });
+      if (modoLote) {
+        const criadas = await criarMultiplasBancadas({
+          setor_id: setorId,
+          tipo,
+          capacidade_total: capacidadeTotal,
+          status,
+          quantidade: quantidadeLote,
+          x_inicial: x,
+          y_inicial: y,
+          eixo_incremento: eixoIncremento
+        });
 
-      alert("Bancada cadastrada com sucesso!");
+        alert(`${criadas.length} bancadas criadas com sucesso!`);
+      } else {
+        const bancada = await criarBancada({
+          setor_id: setorId,
+          tipo,
+          capacidade_total: capacidadeTotal,
+          status,
+          x,
+          y
+        });
 
-      setCodigo("");
+        alert(`Bancada ${bancada.codigo} cadastrada com sucesso!`);
+      }
+
+      setSetorId("");
       setTipo("bercario");
       setCapacidadeTotal("");
       setStatus("vazia");
       setX("");
       setY("");
+      setModoLote(false);
+      setQuantidadeLote("1");
+      setEixoIncremento("x");
 
       carregar();
     } catch (error) {
@@ -129,40 +171,29 @@ export default function CadastroBancadasScreen({ onVoltar }) {
     }
   }
 
-  function renderItem({ item }) {
-    return (
-      <View style={styles.card}>
-        <Text style={styles.cardTitulo}>{item.codigo}</Text>
-        <Text>Tipo: {item.tipo}</Text>
-        <Text>Capacidade: {item.capacidade_total}</Text>
-        <Text>Status: {item.status}</Text>
-        <Text>Posição: ({item.x}, {item.y})</Text>
-
-        <View style={styles.linha}>
-          <View style={styles.botao}>
-            <Button title="Editar" onPress={() => abrirEdicao(item)} />
-          </View>
-          <View style={styles.botao}>
-            <Button title="Excluir" onPress={() => handleExcluir(item.id)} />
-          </View>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
       <Button title="Voltar" onPress={onVoltar} />
 
       <Text style={styles.titulo}>CRUD de Bancadas</Text>
 
-      <Text style={styles.label}>Código</Text>
-      <TextInput
-        style={styles.input}
-        value={codigo}
-        onChangeText={setCodigo}
-        placeholder="B01 ou F01"
+      <SelectCardList
+        title="Selecionar setor"
+        items={setores}
+        selectedId={setorId}
+        onSelect={setSetorId}
+        emptyMessage="Nenhum setor ativo cadastrado."
+        getTitle={(item) => `${item.codigo} - ${item.nome}`}
+        getSubtitle={(item) => `Contador atual: ${item.contador_bancadas || 0}`}
       />
+
+      {setorSelecionado && (
+        <Text style={styles.selecionado}>
+          Próxima bancada do setor {setorSelecionado.codigo}:{" "}
+          {setorSelecionado.codigo}
+          {Number(setorSelecionado.contador_bancadas || 0) + 1}
+        </Text>
+      )}
 
       <OptionSelectField
         label="Tipo"
@@ -186,7 +217,7 @@ export default function CadastroBancadasScreen({ onVoltar }) {
         options={OPCOES_STATUS_BANCADA}
       />
 
-      <Text style={styles.label}>Posição X</Text>
+      <Text style={styles.label}>Posição X inicial</Text>
       <TextInput
         style={styles.input}
         value={x}
@@ -194,7 +225,7 @@ export default function CadastroBancadasScreen({ onVoltar }) {
         keyboardType="numeric"
       />
 
-      <Text style={styles.label}>Posição Y</Text>
+      <Text style={styles.label}>Posição Y inicial</Text>
       <TextInput
         style={styles.input}
         value={y}
@@ -202,14 +233,63 @@ export default function CadastroBancadasScreen({ onVoltar }) {
         keyboardType="numeric"
       />
 
-      <Button title="Cadastrar Bancada" onPress={handleCriar} />
+      <View style={styles.linhaModo}>
+        <View style={styles.botaoModo}>
+          <Button
+            title={modoLote ? "Modo: várias bancadas" : "Modo: 1 bancada"}
+            onPress={() => setModoLote(!modoLote)}
+          />
+        </View>
+      </View>
+
+      {modoLote && (
+        <>
+          <Text style={styles.label}>Quantidade de bancadas</Text>
+          <TextInput
+            style={styles.input}
+            value={quantidadeLote}
+            onChangeText={setQuantidadeLote}
+            keyboardType="numeric"
+          />
+
+          <OptionSelectField
+            label="Eixo de incremento"
+            value={eixoIncremento}
+            onChange={setEixoIncremento}
+            options={OPCOES_EIXO}
+          />
+        </>
+      )}
+
+      <Button
+        title={modoLote ? "Criar bancadas em lote" : "Cadastrar bancada"}
+        onPress={handleCriar}
+      />
 
       <Text style={styles.subtitulo}>Bancadas cadastradas</Text>
 
       <FlatList
         data={bancadas}
         keyExtractor={(item) => item.id}
-        renderItem={renderItem}
+        renderItem={({ item }) => (
+          <View style={styles.card}>
+            <Text style={styles.cardTitulo}>{item.codigo}</Text>
+            <Text>Setor: {item.setor_codigo}</Text>
+            <Text>Tipo: {item.tipo}</Text>
+            <Text>Capacidade: {item.capacidade_total}</Text>
+            <Text>Status: {item.status}</Text>
+            <Text>Posição: ({item.x}, {item.y})</Text>
+
+            <View style={styles.linha}>
+              <View style={styles.botao}>
+                <Button title="Editar" onPress={() => abrirEdicao(item)} />
+              </View>
+              <View style={styles.botao}>
+                <Button title="Excluir" onPress={() => handleExcluir(item.id)} />
+              </View>
+            </View>
+          </View>
+        )}
       />
 
       <Modal visible={modalVisible} transparent animationType="slide">
@@ -295,6 +375,17 @@ const styles = StyleSheet.create({
   },
   botao: {
     marginRight: 10
+  },
+  linhaModo: {
+    marginVertical: 10
+  },
+  botaoModo: {
+    marginBottom: 8
+  },
+  selecionado: {
+    marginTop: 4,
+    marginBottom: 10,
+    fontWeight: "bold"
   },
   overlay: {
     flex: 1,

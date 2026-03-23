@@ -1,4 +1,4 @@
-import { get, ref, remove, set, update } from "firebase/database";
+import { get, ref, remove, update } from "firebase/database";
 import { db } from "../config/firebaseConfig";
 import { gerarId } from "../utils/idGenerator";
 
@@ -33,42 +33,52 @@ function validarStatusBancada(status) {
   return valor;
 }
 
+async function buscarSetorObrigatorio(setorId) {
+  const snapshot = await get(ref(db, `setores/${setorId}`));
+
+  if (!snapshot.exists()) {
+    throw new Error("Setor não encontrado.");
+  }
+
+  const setor = snapshot.val();
+
+  if (!setor.ativo) {
+    throw new Error("O setor selecionado está inativo.");
+  }
+
+  return setor;
+}
+
+function gerarCodigoBancada(setorCodigo, contador) {
+  return `${(setorCodigo || "").trim().toUpperCase()}${contador}`;
+}
+
 export async function criarBancada({
-  codigo,
+  setor_id,
   tipo,
   capacidade_total,
   status = "vazia",
   x,
   y
 }) {
-  const id = gerarId("ban");
+  const setor = await buscarSetorObrigatorio(setor_id);
 
-  const codigoNormalizado = (codigo || "").trim().toUpperCase();
   const tipoValidado = validarTipoBancada(tipo);
   const statusValidado = validarStatusBancada(status);
-
-  if (!codigoNormalizado) {
-    throw new Error("Código da bancada é obrigatório.");
-  }
 
   if (Number(capacidade_total) <= 0) {
     throw new Error("Capacidade total deve ser maior que zero.");
   }
 
-  const snapshot = await get(ref(db, "bancadas"));
-  const existentes = snapshot.exists() ? Object.values(snapshot.val()) : [];
-
-  const codigoJaExiste = existentes.some(
-    (item) => (item.codigo || "").trim().toUpperCase() === codigoNormalizado
-  );
-
-  if (codigoJaExiste) {
-    throw new Error("Já existe uma bancada com esse código.");
-  }
+  const novoContador = Number(setor.contador_bancadas || 0) + 1;
+  const codigo = gerarCodigoBancada(setor.codigo, novoContador);
+  const id = gerarId("ban");
 
   const novaBancada = {
     id,
-    codigo: codigoNormalizado,
+    codigo,
+    setor_id: setor.id,
+    setor_codigo: setor.codigo,
     tipo: tipoValidado,
     capacidade_total: Number(capacidade_total),
     status: statusValidado,
@@ -77,8 +87,82 @@ export async function criarBancada({
     active: true
   };
 
-  await set(ref(db, `bancadas/${id}`), novaBancada);
+  const updates = {};
+  updates[`bancadas/${id}`] = novaBancada;
+  updates[`setores/${setor.id}/contador_bancadas`] = novoContador;
+
+  await update(ref(db), updates);
+
   return novaBancada;
+}
+
+export async function criarMultiplasBancadas({
+  setor_id,
+  tipo,
+  capacidade_total,
+  status = "vazia",
+  quantidade,
+  x_inicial = 0,
+  y_inicial = 0,
+  eixo_incremento = "x"
+}) {
+  const setor = await buscarSetorObrigatorio(setor_id);
+
+  const tipoValidado = validarTipoBancada(tipo);
+  const statusValidado = validarStatusBancada(status);
+  const qtd = Number(quantidade);
+
+  if (Number(capacidade_total) <= 0) {
+    throw new Error("Capacidade total deve ser maior que zero.");
+  }
+
+  if (qtd <= 0) {
+    throw new Error("A quantidade de bancadas deve ser maior que zero.");
+  }
+
+  if (!["x", "y"].includes((eixo_incremento || "").toLowerCase())) {
+    throw new Error("O eixo de incremento deve ser 'x' ou 'y'.");
+  }
+
+  const contadorInicial = Number(setor.contador_bancadas || 0);
+  const updates = {};
+  const criadas = [];
+
+  for (let i = 1; i <= qtd; i++) {
+    const contadorAtual = contadorInicial + i;
+    const codigo = gerarCodigoBancada(setor.codigo, contadorAtual);
+    const id = gerarId("ban");
+
+    const x = (eixo_incremento || "").toLowerCase() === "x"
+      ? Number(x_inicial) + (i - 1)
+      : Number(x_inicial);
+
+    const y = (eixo_incremento || "").toLowerCase() === "y"
+      ? Number(y_inicial) + (i - 1)
+      : Number(y_inicial);
+
+    const bancada = {
+      id,
+      codigo,
+      setor_id: setor.id,
+      setor_codigo: setor.codigo,
+      tipo: tipoValidado,
+      capacidade_total: Number(capacidade_total),
+      status: statusValidado,
+      x,
+      y,
+      active: true
+    };
+
+    updates[`bancadas/${id}`] = bancada;
+    criadas.push(bancada);
+  }
+
+  updates[`setores/${setor.id}/contador_bancadas`] = contadorInicial + qtd;
+
+  await update(ref(db), updates);
+
+  return criadas;
 }
 
 export async function listarBancadas() {
