@@ -13,6 +13,11 @@ import {
   listarLotesParaAuditoria
 } from "../services/auditoriaService";
 import {
+  calcularDiasDesdeEntrada,
+  calcularDiasNaOcupacao,
+  obterStatusVisualLote
+} from "../services/statusLoteService";
+import {
   compartilharPdfAuditoria,
   gerarPdfAuditoriaPorLote
 } from "../services/relatorioAuditoriaService";
@@ -87,6 +92,45 @@ export default function HistoricoScreen() {
       setGerandoPdf(false);
     }
   }
+  function obterStatusVisualAuditoriaOcupacao(item) {
+  const diasEntrada = calcularDiasDesdeEntrada(auditoria?.lote?.data_formacao);
+  const diasOcupacao = calcularDiasNaOcupacao(item.data_inicio, item.data_fim);
+
+  const statusVisual = obterStatusVisualLote({
+    lote: auditoria?.lote,
+    bancadaTipo: item?.bancada?.tipo,
+    diasDesdeEntrada: diasEntrada,
+    diasNaOcupacao: diasOcupacao,
+    temColheita: (auditoria?.colheitas || []).length > 0
+  });
+
+  return {
+    diasEntrada,
+    diasOcupacao,
+    statusVisual
+  };
+}
+
+function obterCorStatusVisual(statusVisual) {
+  switch ((statusVisual || "").toLowerCase()) {
+    case "recém-entrado":
+    case "recem-entrado":
+      return "#d6eaf8";
+    case "em berçário":
+    case "em bercario":
+      return "#fcf3cf";
+    case "pronto para final":
+      return "#fdebd0";
+    case "em final":
+      return "#d5f5e3";
+    case "pronto para colher":
+      return "#abebc6";
+    case "colhido":
+      return "#d7dbdd";
+    default:
+      return "#f4f6f7";
+  }
+}
 
   const lotesFiltrados = lotes.filter((item) => {
     const termo = busca.trim().toLowerCase();
@@ -182,7 +226,27 @@ export default function HistoricoScreen() {
                 <Text>Data início: {item.data_inicio}</Text>
                 <Text>Data fim: {item.data_fim || "-"}</Text>
                 <Text>Tipo ocupação: {item.tipo_ocupacao}</Text>
-                <Text>Status: {item.status}</Text>
+<Text>Status do banco: {item.status}</Text>
+
+{(() => {
+  const resumo = obterStatusVisualAuditoriaOcupacao(item);
+
+  return (
+    <>
+      <Text>Dias na ocupação: {resumo.diasOcupacao}</Text>
+      <Text>Dias desde a entrada: {resumo.diasEntrada}</Text>
+
+      <View
+        style={[
+          styles.badgeStatus,
+          { backgroundColor: obterCorStatusVisual(resumo.statusVisual) }
+        ]}
+      >
+        <Text style={styles.badgeStatusTexto}>{resumo.statusVisual}</Text>
+      </View>
+    </>
+  );
+})()}
               </View>
             ))
           )}
@@ -362,6 +426,18 @@ const styles = StyleSheet.create({
     padding: 8,
     marginBottom: 6
   },
+  badgeStatus: {
+  alignSelf: "flex-start",
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+  borderRadius: 20,
+  marginTop: 6,
+  marginBottom: 6
+},
+badgeStatusTexto: {
+  fontWeight: "bold",
+  fontSize: 12
+},
   linhaBotoes: {
     flexDirection: "row",
     marginBottom: 12

@@ -1,58 +1,59 @@
-import { get, ref } from "firebase/database";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  Button,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Switch,
+  View,
   Text,
-  TextInput,
+  StyleSheet,
+  ScrollView,
   TouchableOpacity,
-  View
+  Modal,
+  Button,
+  TextInput,
+  Switch
 } from "react-native";
-import BancadaFaixaBar from "../components/BancadaFaixaBar";
-import DatePickerField from "../components/DatePickerField";
-import DateTimePickerField from "../components/DateTimePickerField";
-import OptionSelectField from "../components/OptionSelectField";
-import SelectCardList from "../components/SelectCardList";
+import { get, ref } from "firebase/database";
 import { db } from "../config/firebaseConfig";
+import {
+  listarOcupacoesAtivasPorBancada,
+  registrarOcupacaoBancada,
+  encerrarOcupacaoBancada,
+  transplantarParaOutraBancada
+} from "../services/ocupacaoService";
+import { validarDataISO } from "../services/entradaService";
 import {
   colherOcupacao,
   listarColheitasPorOcupacao
 } from "../services/colheitaService";
-import { validarDataISO } from "../services/entradaService";
 import {
-  calcularResumoCapacidade,
-  sugerirProximaFaixaLivre
+  calcularResumoCapacidade
 } from "../services/faixaBancadaService";
-import {
-  listarMonitoramentosPorBancada,
-  registrarMonitoramento
-} from "../services/monitoramentoService";
-import {
-  listarOcorrenciasPorOcupacao,
-  registrarOcorrencia,
-  resolverOcorrencia
-} from "../services/ocorrenciaService";
-import {
-  encerrarOcupacaoBancada,
-  listarOcupacoesAtivasPorBancada,
-  registrarOcupacaoBancada,
-  transplantarParaOutraBancada
-} from "../services/ocupacaoService";
 import { calcularResumoLotes } from "../services/saldoLoteService";
+import {
+  sugerirFaixaParaQuantidade,
+  obterMaiorFaixaLivre
+} from "../services/ocupacaoSugestaoService";
+import {
+  calcularDiasDesdeEntrada,
+  calcularDiasNaOcupacao,
+  obterStatusVisualLote
+} from "../services/statusLoteService";
+import DatePickerField from "../components/DatePickerField";
+import OptionSelectField from "../components/OptionSelectField";
+import SelectCardList from "../components/SelectCardList";
+import BancadaFaixaBar from "../components/BancadaFaixaBar";
 
 export default function DashboardScreen() {
   const [bancadas, setBancadas] = useState([]);
   const [lotesAtivos, setLotesAtivos] = useState([]);
-  const [bancadaSelecionada, setBancadaSelecionada] = useState(null);
+  const [setores, setSetores] = useState([]);
 
+  const [filtroSetor, setFiltroSetor] = useState("");
+  const [filtroTipo, setFiltroTipo] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState("");
+  const [buscaCodigo, setBuscaCodigo] = useState("");
+
+  const [bancadaSelecionada, setBancadaSelecionada] = useState(null);
   const [ocupacoesAtivasBancada, setOcupacoesAtivasBancada] = useState([]);
   const [ocupacaoSelecionadaId, setOcupacaoSelecionadaId] = useState("");
-
-  const [monitoramentos, setMonitoramentos] = useState([]);
-  const [ocorrencias, setOcorrencias] = useState([]);
   const [colheitas, setColheitas] = useState([]);
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -64,12 +65,6 @@ export default function DashboardScreen() {
   const [dataInicio, setDataInicio] = useState("");
   const [tipoOcupacao, setTipoOcupacao] = useState("bercario");
 
-  const [dataHoraMonitoramento, setDataHoraMonitoramento] = useState("");
-  const [ph, setPh] = useState("");
-  const [ce, setCe] = useState("");
-  const [temperaturaAgua, setTemperaturaAgua] = useState("");
-  const [observacoes, setObservacoes] = useState("");
-
   const [bancadaDestinoId, setBancadaDestinoId] = useState("");
   const [buscaBancadaDestino, setBuscaBancadaDestino] = useState("");
   const [quantidadeTransplantada, setQuantidadeTransplantada] = useState("");
@@ -78,16 +73,13 @@ export default function DashboardScreen() {
   const [posicaoFinalDestino, setPosicaoFinalDestino] = useState("");
   const [encerrarOrigem, setEncerrarOrigem] = useState(false);
 
-  const [tipoOcorrencia, setTipoOcorrencia] = useState("praga");
-  const [descricaoOcorrencia, setDescricaoOcorrencia] = useState("");
-  const [acaoCorretiva, setAcaoCorretiva] = useState("");
-  const [dataHoraOcorrencia, setDataHoraOcorrencia] = useState("");
-  const [statusOcorrencia, setStatusOcorrencia] = useState("aberta");
-
   const [dataColheita, setDataColheita] = useState("");
   const [quantidadeColhida, setQuantidadeColhida] = useState("");
   const [quantidadePerda, setQuantidadePerda] = useState("");
   const [tipoColheita, setTipoColheita] = useState("parcial");
+
+  const [faixaSugeridaAtual, setFaixaSugeridaAtual] = useState(null);
+  const [faixaSugeridaDestino, setFaixaSugeridaDestino] = useState(null);
 
   const OPCOES_TIPO_OCUPACAO_BERCARIO = [
     { label: "Berçário", value: "bercario" }
@@ -97,48 +89,29 @@ export default function DashboardScreen() {
     { label: "Entrada direta final", value: "entrada_direta_final" }
   ];
 
-  const OPCOES_TIPO_OCORRENCIA = [
-    { label: "Praga", value: "praga" },
-    { label: "Doença", value: "doenca" },
-    { label: "Perda", value: "perda" },
-    { label: "Contaminação", value: "contaminacao" }
-  ];
-
-  const OPCOES_STATUS_OCORRENCIA = [
-    { label: "Aberta", value: "aberta" },
-    { label: "Resolvida", value: "resolvida" }
-  ];
-
   const OPCOES_TIPO_COLHEITA = [
     { label: "Parcial", value: "parcial" },
     { label: "Total", value: "total" }
   ];
 
+  const OPCOES_FILTRO_TIPO = [
+    { label: "Todos", value: "" },
+    { label: "Berçário", value: "bercario" },
+    { label: "Final", value: "final" }
+  ];
+
+  const OPCOES_FILTRO_STATUS = [
+    { label: "Todos", value: "" },
+    { label: "Vazia", value: "vazia" },
+    { label: "Ocupada", value: "ocupada" },
+    { label: "Alerta", value: "alerta" },
+    { label: "Manutenção", value: "manutencao" },
+    { label: "Inativa", value: "inativa" }
+  ];
+
   useEffect(() => {
     carregarTudo();
   }, []);
-
-  useEffect(() => {
-    if (!bancadaSelecionada) return;
-
-    const sugestao = sugerirProximaFaixaLivre(
-      bancadaSelecionada.capacidade_total,
-      ocupacoesAtivasBancada,
-      quantidadeAlocada
-    );
-
-    if (sugestao) {
-      setPosicaoInicial(String(sugestao.inicio));
-
-      if (quantidadeAlocada && Number(quantidadeAlocada) > 0) {
-        const qtd = Number(quantidadeAlocada);
-        const fimCalculado = sugestao.inicio + qtd - 1;
-        setPosicaoFinal(String(Math.min(fimCalculado, sugestao.fim)));
-      } else {
-        setPosicaoFinal(String(sugestao.fim));
-      }
-    }
-  }, [quantidadeAlocada, ocupacoesAtivasBancada, bancadaSelecionada]);
 
   const ocupacaoSelecionada =
     ocupacoesAtivasBancada.find((item) => item.id === ocupacaoSelecionadaId) || null;
@@ -152,81 +125,121 @@ export default function DashboardScreen() {
     );
   }, [bancadaSelecionada, ocupacoesAtivasBancada]);
 
-  const tiposDestinoPreferenciais = useMemo(() => {
-    const tipoOrigem = (bancadaSelecionada?.tipo || "").toLowerCase();
-    if (tipoOrigem === "bercario") return ["final"];
-    return [];
-  }, [bancadaSelecionada]);
+  useEffect(() => {
+    if (!bancadaSelecionada || !resumoCapacidade) {
+      setFaixaSugeridaAtual(null);
+      return;
+    }
+
+    const sugestao = sugerirFaixaParaQuantidade(
+      resumoCapacidade.faixasLivres,
+      quantidadeAlocada
+    );
+
+    setFaixaSugeridaAtual(sugestao);
+
+    if (sugestao) {
+      setPosicaoInicial(String(sugestao.inicio));
+      setPosicaoFinal(String(sugestao.fim));
+    }
+  }, [quantidadeAlocada, resumoCapacidade, bancadaSelecionada]);
+
+  useEffect(() => {
+    async function sugerirDestino() {
+      if (!bancadaDestinoId || !quantidadeTransplantada) {
+        setFaixaSugeridaDestino(null);
+        return;
+      }
+
+      const bancadaDestino = bancadas.find((item) => item.id === bancadaDestinoId);
+      if (!bancadaDestino) {
+        setFaixaSugeridaDestino(null);
+        return;
+      }
+
+      const ocupacoesDestino = await listarOcupacoesAtivasPorBancada(bancadaDestinoId);
+      const resumoDestino = calcularResumoCapacidade(
+        bancadaDestino.capacidade_total,
+        ocupacoesDestino
+      );
+
+      const sugestao = sugerirFaixaParaQuantidade(
+        resumoDestino.faixasLivres,
+        quantidadeTransplantada
+      );
+
+      setFaixaSugeridaDestino(sugestao);
+
+      if (sugestao) {
+        setPosicaoInicialDestino(String(sugestao.inicio));
+        setPosicaoFinalDestino(String(sugestao.fim));
+      }
+    }
+
+    sugerirDestino();
+  }, [bancadaDestinoId, quantidadeTransplantada, bancadas]);
+
+  const bancadasFiltradas = useMemo(() => {
+    return bancadas.filter((item) => {
+      if (filtroSetor && item.setor_id !== filtroSetor) return false;
+      if (filtroTipo && item.tipo !== filtroTipo) return false;
+      if (filtroStatus && item.status !== filtroStatus) return false;
+
+      if (buscaCodigo.trim()) {
+        const termo = buscaCodigo.trim().toLowerCase();
+        return (item.codigo || "").toLowerCase().includes(termo);
+      }
+
+      return true;
+    });
+  }, [bancadas, filtroSetor, filtroTipo, filtroStatus, buscaCodigo]);
 
   const bancadasDestinoFiltradas = useMemo(() => {
     const termo = buscaBancadaDestino.trim().toLowerCase();
 
-    const listaBase = bancadas
+    return bancadas
       .filter((item) => item.id !== bancadaSelecionada?.id)
+      .filter((item) => item.tipo === "final")
       .filter((item) => {
         if (!termo) return true;
-
         return (
           (item.codigo || "").toLowerCase().includes(termo) ||
-          (item.tipo || "").toLowerCase().includes(termo) ||
-          (item.status || "").toLowerCase().includes(termo)
+          (item.status || "").toLowerCase().includes(termo) ||
+          (item.setor_codigo || "").toLowerCase().includes(termo)
         );
       })
       .sort((a, b) => {
-        const prioridadeCompatibilidade = (item) => {
-          if (tiposDestinoPreferenciais.length === 0) return 0;
-          return tiposDestinoPreferenciais.includes((item.tipo || "").toLowerCase()) ? 0 : 1;
-        };
-
-        const prioridadeStatus = (status) => {
-          if (status === "vazia") return 0;
-          if (status === "ocupada") return 1;
-          if (status === "alerta") return 2;
-          if (status === "manutencao") return 3;
-          return 4;
-        };
-
-        const diffCompat =
-          prioridadeCompatibilidade(a) - prioridadeCompatibilidade(b);
-        if (diffCompat !== 0) return diffCompat;
-
-        const diffStatus =
-          prioridadeStatus((a.status || "").toLowerCase()) -
-          prioridadeStatus((b.status || "").toLowerCase());
-        if (diffStatus !== 0) return diffStatus;
-
+        if (a.status === "vazia" && b.status !== "vazia") return -1;
+        if (a.status !== "vazia" && b.status === "vazia") return 1;
         return (a.codigo || "").localeCompare(b.codigo || "");
       });
+  }, [bancadas, bancadaSelecionada, buscaBancadaDestino]);
 
-    if (!termo && listaBase.length > 25) {
-      return listaBase.slice(0, 25);
-    }
+  const limitesGrade = useMemo(() => {
+    if (bancadasFiltradas.length === 0) return { maxX: 5, maxY: 5 };
 
-    return listaBase;
-  }, [bancadas, bancadaSelecionada, buscaBancadaDestino, tiposDestinoPreferenciais]);
+    const maxX = Math.max(...bancadasFiltradas.map((b) => Number(b.x || 0)));
+    const maxY = Math.max(...bancadasFiltradas.map((b) => Number(b.y || 0)));
 
-  function obterLotePorId(id) {
-    return lotesAtivos.find((item) => item.id === id) || null;
-  }
-
-  function obterDescricaoFluxo() {
-    const tipoOrigem = (bancadaSelecionada?.tipo || "").toLowerCase();
-    if (tipoOrigem === "bercario") return "Fluxo sugerido: berçário → final";
-    if (tipoOrigem === "final") return "Bancada final";
-    return "";
-  }
+    return { maxX, maxY };
+  }, [bancadasFiltradas]);
 
   async function carregarTudo() {
     try {
-      const snapshot = await get(ref(db, "bancadas"));
+      const [bancadasSnapshot, lotes, setoresSnapshot] = await Promise.all([
+        get(ref(db, "bancadas")),
+        calcularResumoLotes(),
+        get(ref(db, "setores"))
+      ]);
 
-      if (snapshot.exists()) {
-        setBancadas(Object.values(snapshot.val()));
-      } else {
-        setBancadas([]);
-      }
+      setBancadas(
+        bancadasSnapshot.exists() ? Object.values(bancadasSnapshot.val()) : []
+      );
 
-      const lotes = await calcularResumoLotes();
+      setSetores(
+        setoresSnapshot.exists() ? Object.values(setoresSnapshot.val()) : []
+      );
+
       setLotesAtivos(
         lotes.filter(
           (lote) =>
@@ -249,17 +262,10 @@ export default function DashboardScreen() {
 
     setOcupacaoSelecionadaId(proximaOcupacaoId);
 
-    const listaMonitoramentos = await listarMonitoramentosPorBancada(bancada.id);
-    setMonitoramentos(listaMonitoramentos);
-
     if (proximaOcupacaoId) {
-      const listaOcorrencias = await listarOcorrenciasPorOcupacao(proximaOcupacaoId);
-      setOcorrencias(listaOcorrencias);
-
       const listaColheitas = await listarColheitasPorOcupacao(proximaOcupacaoId);
       setColheitas(listaColheitas);
     } else {
-      setOcorrencias([]);
       setColheitas([]);
     }
   }
@@ -277,12 +283,6 @@ export default function DashboardScreen() {
         bancada.tipo === "bercario" ? "bercario" : "entrada_direta_final"
       );
 
-      setDataHoraMonitoramento("");
-      setPh("");
-      setCe("");
-      setTemperaturaAgua("");
-      setObservacoes("");
-
       setBancadaDestinoId("");
       setBuscaBancadaDestino("");
       setQuantidadeTransplantada("");
@@ -290,12 +290,6 @@ export default function DashboardScreen() {
       setPosicaoInicialDestino("");
       setPosicaoFinalDestino("");
       setEncerrarOrigem(false);
-
-      setTipoOcorrencia("praga");
-      setDescricaoOcorrencia("");
-      setAcaoCorretiva("");
-      setDataHoraOcorrencia("");
-      setStatusOcorrencia("aberta");
 
       setDataColheita("");
       setQuantidadeColhida("");
@@ -310,17 +304,13 @@ export default function DashboardScreen() {
   }
 
   useEffect(() => {
-    async function carregarDependenciasDaOcupacao() {
+    async function carregarColheitas() {
       if (!ocupacaoSelecionadaId) {
-        setOcorrencias([]);
         setColheitas([]);
         return;
       }
 
       try {
-        const listaOcorrencias = await listarOcorrenciasPorOcupacao(ocupacaoSelecionadaId);
-        setOcorrencias(listaOcorrencias);
-
         const listaColheitas = await listarColheitasPorOcupacao(ocupacaoSelecionadaId);
         setColheitas(listaColheitas);
       } catch (error) {
@@ -328,51 +318,74 @@ export default function DashboardScreen() {
       }
     }
 
-    carregarDependenciasDaOcupacao();
+    carregarColheitas();
   }, [ocupacaoSelecionadaId]);
 
-  function obterCorPorStatus(status, tipo) {
-    const statusNormalizado = (status || "").toLowerCase();
-    const tipoNormalizado = (tipo || "").toLowerCase();
-
-    if (statusNormalizado === "ocupada") {
-      if (tipoNormalizado === "bercario") return "#f4d03f";
-      if (tipoNormalizado === "final") return "#58d68d";
-      return "#58d68d";
-    }
-
-    if (statusNormalizado === "alerta") return "#e74c3c";
-    if (statusNormalizado === "manutencao") return "#f5b041";
-    if (statusNormalizado === "inativa") return "#85929e";
-
-    return "#d5d8dc";
-  }
-
-  const limitesGrade = useMemo(() => {
-    if (bancadas.length === 0) {
-      return { maxX: 5, maxY: 5 };
-    }
-
-    const maxX = Math.max(...bancadas.map((b) => Number(b.x || 0)));
-    const maxY = Math.max(...bancadas.map((b) => Number(b.y || 0)));
-
-    return { maxX, maxY };
-  }, [bancadas]);
-
   function encontrarBancadaNaPosicao(x, y) {
-    return bancadas.find(
+    return bancadasFiltradas.find(
       (bancada) => Number(bancada.x) === x && Number(bancada.y) === y
     );
   }
 
+  function obterCorPorStatus(status, tipo) {
+    if (status === "ocupada" && tipo === "bercario") return "#f4d03f";
+    if (status === "ocupada" && tipo === "final") return "#58d68d";
+    if (status === "alerta") return "#e74c3c";
+    if (status === "manutencao") return "#f5b041";
+    if (status === "inativa") return "#85929e";
+    return "#d5d8dc";
+  }
+
+  function obterCorStatusVisual(statusVisual) {
+    switch ((statusVisual || "").toLowerCase()) {
+      case "recém-entrado":
+      case "recem-entrado":
+        return "#d6eaf8";
+      case "em berçário":
+      case "em bercario":
+        return "#fcf3cf";
+      case "pronto para final":
+        return "#fdebd0";
+      case "em final":
+        return "#d5f5e3";
+      case "pronto para colher":
+        return "#abebc6";
+      case "colhido":
+        return "#d7dbdd";
+      default:
+        return "#f4f6f7";
+    }
+  }
+
+  function obterResumoVisualDaOcupacao(ocupacao) {
+    const lote = lotesAtivos.find((item) => item.id === ocupacao.lote_producao_id);
+
+    const diasEntrada = calcularDiasDesdeEntrada(lote?.data_formacao);
+    const diasOcupacao = calcularDiasNaOcupacao(
+      ocupacao.data_inicio,
+      ocupacao.data_fim
+    );
+
+    const statusVisual = obterStatusVisualLote({
+      lote,
+      bancadaTipo: bancadaSelecionada?.tipo,
+      diasDesdeEntrada: diasEntrada,
+      diasNaOcupacao: diasOcupacao,
+      temColheita: colheitas.length > 0
+    });
+
+    return {
+      lote,
+      diasEntrada,
+      diasOcupacao,
+      statusVisual
+    };
+  }
+
   async function handleRegistrarOcupacao() {
     try {
-      if (!bancadaSelecionada) {
-        alert("Nenhuma bancada selecionada.");
-        return;
-      }
-
       if (
+        !bancadaSelecionada ||
         !loteSelecionadoId ||
         !posicaoInicial ||
         !posicaoFinal ||
@@ -432,50 +445,10 @@ export default function DashboardScreen() {
     }
   }
 
-  async function handleRegistrarMonitoramento() {
-    try {
-      if (!bancadaSelecionada) {
-        alert("Nenhuma bancada selecionada.");
-        return;
-      }
-
-      if (!dataHoraMonitoramento || !ph || !ce) {
-        alert("Preencha data/hora, pH e CE.");
-        return;
-      }
-
-      await registrarMonitoramento({
-        bancada_id: bancadaSelecionada.id,
-        data_hora: dataHoraMonitoramento.trim(),
-        ph,
-        ce,
-        temperatura_agua: temperaturaAgua,
-        observacoes
-      });
-
-      alert("Monitoramento registrado com sucesso!");
-
-      setDataHoraMonitoramento("");
-      setPh("");
-      setCe("");
-      setTemperaturaAgua("");
-      setObservacoes("");
-
-      await carregarTudo();
-      await carregarDetalhesBancada(bancadaSelecionada);
-    } catch (error) {
-      alert(error.message);
-    }
-  }
-
   async function handleTransplante() {
     try {
-      if (!ocupacaoSelecionada) {
-        alert("Selecione uma ocupação ativa para transplantar.");
-        return;
-      }
-
       if (
+        !ocupacaoSelecionada ||
         !bancadaDestinoId ||
         !quantidadeTransplantada ||
         !dataTransplante ||
@@ -491,7 +464,7 @@ export default function DashboardScreen() {
         return;
       }
 
-      const resultado = await transplantarParaOutraBancada({
+      await transplantarParaOutraBancada({
         ocupacao_origem_id: ocupacaoSelecionada.id,
         bancada_destino_id: bancadaDestinoId,
         quantidade_transplantada: quantidadeTransplantada,
@@ -501,9 +474,7 @@ export default function DashboardScreen() {
         encerrar_ocupacao_origem: encerrarOrigem
       });
 
-      alert(
-        `Transplante realizado com sucesso!\n\nNova ocupação: ${resultado.nova_ocupacao.id}`
-      );
+      alert("Transplante realizado com sucesso!");
 
       setBancadaDestinoId("");
       setBuscaBancadaDestino("");
@@ -512,54 +483,6 @@ export default function DashboardScreen() {
       setPosicaoInicialDestino("");
       setPosicaoFinalDestino("");
       setEncerrarOrigem(false);
-
-      await carregarTudo();
-      await carregarDetalhesBancada(bancadaSelecionada);
-    } catch (error) {
-      alert(error.message);
-    }
-  }
-
-  async function handleRegistrarOcorrencia() {
-    try {
-      if (!ocupacaoSelecionada) {
-        alert("Selecione uma ocupação ativa para registrar ocorrência.");
-        return;
-      }
-
-      if (!tipoOcorrencia || !descricaoOcorrencia || !dataHoraOcorrencia) {
-        alert("Preencha tipo, descrição e data/hora.");
-        return;
-      }
-
-      await registrarOcorrencia({
-        ocupacao_bancada_id: ocupacaoSelecionada.id,
-        tipo_ocorrencia: tipoOcorrencia,
-        descricao: descricaoOcorrencia,
-        acao_corretiva: acaoCorretiva,
-        data_hora: dataHoraOcorrencia,
-        status: statusOcorrencia
-      });
-
-      alert("Ocorrência registrada com sucesso!");
-
-      setTipoOcorrencia("praga");
-      setDescricaoOcorrencia("");
-      setAcaoCorretiva("");
-      setDataHoraOcorrencia("");
-      setStatusOcorrencia("aberta");
-
-      await carregarTudo();
-      await carregarDetalhesBancada(bancadaSelecionada);
-    } catch (error) {
-      alert(error.message);
-    }
-  }
-
-  async function handleResolverOcorrencia(id) {
-    try {
-      await resolverOcorrencia(id);
-      alert("Ocorrência resolvida com sucesso!");
 
       await carregarTudo();
       await carregarDetalhesBancada(bancadaSelecionada);
@@ -594,7 +517,7 @@ export default function DashboardScreen() {
       });
 
       alert(
-        `Colheita registrada com sucesso!\n\nColheita: ${resultado.colheita.id}\nLote comercial: ${resultado.lote_comercial.codigo_lote_comercial}`
+        `Colheita registrada!\nLote comercial: ${resultado.lote_comercial.codigo_lote_comercial}`
       );
 
       setDataColheita("");
@@ -612,6 +535,40 @@ export default function DashboardScreen() {
   function usarFaixaLivre(faixa) {
     setPosicaoInicial(String(faixa.inicio));
     setPosicaoFinal(String(faixa.fim));
+  }
+
+  function usarFaixaSugeridaAtual() {
+    if (!faixaSugeridaAtual) {
+      alert("Não foi encontrada faixa livre suficiente para essa quantidade.");
+      return;
+    }
+
+    setPosicaoInicial(String(faixaSugeridaAtual.inicio));
+    setPosicaoFinal(String(faixaSugeridaAtual.fim));
+  }
+
+  function usarFaixaInteiraRestante() {
+    if (!resumoCapacidade || !resumoCapacidade.faixasLivres.length) {
+      alert("Não existe faixa livre disponível.");
+      return;
+    }
+
+    const maior = obterMaiorFaixaLivre(resumoCapacidade.faixasLivres);
+    if (!maior) return;
+
+    setPosicaoInicial(String(maior.inicio));
+    setPosicaoFinal(String(maior.fim));
+    setQuantidadeAlocada(String(maior.tamanho));
+  }
+
+  function usarFaixaSugeridaDestino() {
+    if (!faixaSugeridaDestino) {
+      alert("Não foi encontrada faixa livre suficiente na bancada destino.");
+      return;
+    }
+
+    setPosicaoInicialDestino(String(faixaSugeridaDestino.inicio));
+    setPosicaoFinalDestino(String(faixaSugeridaDestino.fim));
   }
 
   function renderizarGrade() {
@@ -660,17 +617,40 @@ export default function DashboardScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.titulo}>Mapa da Produção</Text>
-      <Text style={styles.subtitulo}>
-        Controle visual das faixas ocupadas e livres da bancada.
-      </Text>
 
-      <View style={styles.legendaBox}>
-        <Text style={styles.legendaTitulo}>Legenda</Text>
-        <Text>Cinza: vazia</Text>
-        <Text>Amarelo: berçário ocupado</Text>
-        <Text>Verde: final ocupado</Text>
-        <Text>Vermelho: alerta</Text>
-      </View>
+      <OptionSelectField
+        label="Filtrar por tipo"
+        value={filtroTipo}
+        onChange={setFiltroTipo}
+        options={OPCOES_FILTRO_TIPO}
+      />
+
+      <OptionSelectField
+        label="Filtrar por status"
+        value={filtroStatus}
+        onChange={setFiltroStatus}
+        options={OPCOES_FILTRO_STATUS}
+      />
+
+      <SelectCardList
+        title="Filtrar por setor"
+        items={[{ id: "", codigo: "Todos", nome: "Todos os setores" }, ...setores]}
+        selectedId={filtroSetor}
+        onSelect={setFiltroSetor}
+        emptyMessage="Nenhum setor cadastrado."
+        getTitle={(item) =>
+          item.id ? `${item.codigo} - ${item.nome}` : "Todos os setores"
+        }
+        getSubtitle={(item) => (item.id ? item.descricao || "-" : "")}
+      />
+
+      <Text style={styles.label}>Buscar bancada por código</Text>
+      <TextInput
+        style={styles.input}
+        value={buscaCodigo}
+        onChangeText={setBuscaCodigo}
+        placeholder="Ex: A1"
+      />
 
       <ScrollView horizontal>
         <ScrollView>
@@ -682,15 +662,17 @@ export default function DashboardScreen() {
         <View style={styles.overlay}>
           <ScrollView contentContainerStyle={styles.modalScroll}>
             <View style={styles.modal}>
-              <Text style={styles.modalTitulo}>Detalhes da Bancada</Text>
+              <Text style={styles.modalTitulo}>
+                {bancadaSelecionada?.tipo === "bercario"
+                  ? "Operações do Berçário"
+                  : "Operações da Bancada Final"}
+              </Text>
 
               <Text>Código: {bancadaSelecionada?.codigo}</Text>
+              <Text>Setor: {bancadaSelecionada?.setor_codigo}</Text>
               <Text>Tipo: {bancadaSelecionada?.tipo}</Text>
               <Text>Capacidade total: {bancadaSelecionada?.capacidade_total}</Text>
               <Text>Status: {bancadaSelecionada?.status}</Text>
-              <Text>
-                Posição: ({bancadaSelecionada?.x}, {bancadaSelecionada?.y})
-              </Text>
 
               <Text style={styles.subsecao}>Mapa visual da bancada</Text>
 
@@ -701,118 +683,99 @@ export default function DashboardScreen() {
                     faixasOcupadas={resumoCapacidade.faixasOcupadas}
                   />
 
-                  <View style={styles.legendaMiniMapa}>
-                    <View style={styles.legendaItem}>
-                      <View style={styles.corLivre} />
-                      <Text style={styles.legendaMiniTexto}>Livre</Text>
-                    </View>
-
-                    <View style={styles.legendaItem}>
-                      <View style={styles.corOcupado} />
-                      <Text style={styles.legendaMiniTexto}>Ocupado</Text>
-                    </View>
-                  </View>
-                </>
-              )}
-
-              {resumoCapacidade && (
-                <>
-                  <Text style={styles.subsecao}>Resumo da capacidade</Text>
-                  <Text>Capacidade total: {resumoCapacidade.capacidadeTotal}</Text>
-                  <Text>
-                    Total ocupado: {resumoCapacidade.totalOcupado} ({resumoCapacidade.percentualOcupado}%)
-                  </Text>
-                  <Text>
-                    Total livre: {resumoCapacidade.totalLivre} ({resumoCapacidade.percentualLivre}%)
-                  </Text>
-
-                  <Text style={styles.subsecao}>Faixas ocupadas</Text>
-                  {resumoCapacidade.faixasOcupadas.length === 0 ? (
-                    <Text style={styles.aviso}>Nenhuma faixa ocupada.</Text>
-                  ) : (
-                    resumoCapacidade.faixasOcupadas.map((faixa) => (
-                      <View key={faixa.id} style={styles.cardMonitoramento}>
-                        <Text style={styles.cardMonitoramentoTitulo}>Ocupação {faixa.id}</Text>
-                        <Text>Lote: {faixa.lote_producao_id}</Text>
-                        <Text>Faixa: {faixa.inicio} até {faixa.fim}</Text>
-                        <Text>Tamanho: {faixa.tamanho}</Text>
-                        <Text>Quantidade alocada: {faixa.quantidade_alocada}</Text>
-                        <Text>Tipo: {faixa.tipo_ocupacao}</Text>
-                      </View>
-                    ))
-                  )}
+                  <Text>Ocupado: {resumoCapacidade.totalOcupado}</Text>
+                  <Text>Livre: {resumoCapacidade.totalLivre}</Text>
 
                   <Text style={styles.subsecao}>Faixas livres</Text>
                   {resumoCapacidade.faixasLivres.length === 0 ? (
                     <Text style={styles.aviso}>Nenhuma faixa livre.</Text>
                   ) : (
                     resumoCapacidade.faixasLivres.map((faixa, index) => (
-                      <View key={`${faixa.inicio}-${faixa.fim}-${index}`} style={styles.cardLivre}>
-                        <Text style={styles.cardMonitoramentoTitulo}>
+                      <View
+                        key={`${faixa.inicio}-${faixa.fim}-${index}`}
+                        style={styles.cardLivre}
+                      >
+                        <Text>
                           Livre: {faixa.inicio} até {faixa.fim}
                         </Text>
                         <Text>Tamanho: {faixa.tamanho}</Text>
-                        <View style={{ marginTop: 8 }}>
-                          <Button
-                            title="Usar esta faixa"
-                            onPress={() => usarFaixaLivre(faixa)}
-                          />
-                        </View>
+                        <Button title="Usar faixa" onPress={() => usarFaixaLivre(faixa)} />
                       </View>
                     ))
                   )}
                 </>
               )}
 
-              <Text style={styles.subsecao}>Ocupações ativas na bancada</Text>
+              <Text style={styles.subsecao}>Ocupações ativas</Text>
+
               {ocupacoesAtivasBancada.length === 0 ? (
                 <Text style={styles.aviso}>Nenhuma ocupação ativa.</Text>
               ) : (
                 <>
                   <SelectCardList
-                    title="Selecione uma ocupação para ações"
+                    title="Selecionar ocupação"
                     items={ocupacoesAtivasBancada}
                     selectedId={ocupacaoSelecionadaId}
                     onSelect={setOcupacaoSelecionadaId}
                     emptyMessage="Nenhuma ocupação ativa."
                     getTitle={(item) => `Ocupação ${item.id}`}
-                    getSubtitle={(item) =>
-                      `Lote: ${item.lote_producao_id} | Faixa: ${item.posicao_inicial}-${item.posicao_final} | Qtd: ${item.quantidade_alocada}`
-                    }
+                    getSubtitle={(item) => {
+                      const resumo = obterResumoVisualDaOcupacao(item);
+                      return `Faixa: ${item.posicao_inicial}-${item.posicao_final} | ${resumo.statusVisual} | ${resumo.diasOcupacao} dias`;
+                    }}
                   />
 
-                  {ocupacoesAtivasBancada.map((item) => (
-                    <View key={item.id} style={styles.cardMonitoramento}>
-                      <Text style={styles.cardMonitoramentoTitulo}>Ocupação {item.id}</Text>
-                      <Text>Lote: {item.lote_producao_id}</Text>
-                      <Text>Faixa: {item.posicao_inicial} até {item.posicao_final}</Text>
-                      <Text>Quantidade: {item.quantidade_alocada}</Text>
-                      <Text>Data início: {item.data_inicio}</Text>
-                      <Text>Tipo: {item.tipo_ocupacao}</Text>
-                      <Text>Status: {item.status}</Text>
+                  {ocupacoesAtivasBancada.map((item) => {
+                    const resumo = obterResumoVisualDaOcupacao(item);
 
-                      <View style={{ marginTop: 8 }}>
-                        <Button
-                          title="Encerrar esta ocupação"
-                          onPress={() => handleEncerrarOcupacao(item.id)}
-                        />
+                    return (
+                      <View key={item.id} style={styles.card}>
+                        <Text style={styles.cardTitulo}>Ocupação {item.id}</Text>
+                        <Text>Lote: {item.lote_producao_id}</Text>
+                        <Text>Quantidade: {item.quantidade_alocada}</Text>
+                        <Text>
+                          Faixa: {item.posicao_inicial} até {item.posicao_final}
+                        </Text>
+                        <Text>Início: {item.data_inicio}</Text>
+                        <Text>Dias na bancada: {resumo.diasOcupacao}</Text>
+                        <Text>Dias desde a entrada: {resumo.diasEntrada}</Text>
+
+                        <View
+                          style={[
+                            styles.badgeStatus,
+                            { backgroundColor: obterCorStatusVisual(resumo.statusVisual) }
+                          ]}
+                        >
+                          <Text style={styles.badgeStatusTexto}>
+                            {resumo.statusVisual}
+                          </Text>
+                        </View>
+
+                        <Text>Variedade: {resumo.lote?.variedade_nome || "-"}</Text>
+
+                        <View style={{ marginTop: 8 }}>
+                          <Button
+                            title="Encerrar ocupação"
+                            onPress={() => handleEncerrarOcupacao(item.id)}
+                          />
+                        </View>
                       </View>
-                    </View>
-                  ))}
+                    );
+                  })}
                 </>
               )}
 
-              <Text style={styles.subsecao}>Registrar nova ocupação na bancada</Text>
+              <Text style={styles.subsecao}>Registrar nova ocupação</Text>
 
               <SelectCardList
-                title="Escolha um lote ativo"
+                title="Escolher lote"
                 items={lotesAtivos}
                 selectedId={loteSelecionadoId}
                 onSelect={setLoteSelecionadoId}
                 emptyMessage="Nenhum lote ativo disponível."
-                getTitle={(lote) => lote.codigo_lote}
-                getSubtitle={(lote) =>
-                  `${lote.variedade_nome} | Disponível: ${lote.saldo_disponivel_para_ocupar} | Alocado: ${lote.total_alocado_em_bancadas}`
+                getTitle={(item) => item.codigo_lote}
+                getSubtitle={(item) =>
+                  `${item.variedade_nome} | Disponível: ${item.saldo_disponivel_para_ocupar}`
                 }
               />
 
@@ -822,8 +785,42 @@ export default function DashboardScreen() {
                 value={quantidadeAlocada}
                 onChangeText={setQuantidadeAlocada}
                 keyboardType="numeric"
-                placeholder="300"
               />
+
+              {faixaSugeridaAtual ? (
+                <View style={styles.cardSugestao}>
+                  <Text style={styles.cardTitulo}>Faixa sugerida</Text>
+                  <Text>
+                    Usar de {faixaSugeridaAtual.inicio} até {faixaSugeridaAtual.fim}
+                  </Text>
+                  <Text>
+                    Dentro da faixa livre {faixaSugeridaAtual.faixa_original_inicio} até{" "}
+                    {faixaSugeridaAtual.faixa_original_fim}
+                  </Text>
+                  <Text>
+                    Tamanho da faixa livre original:{" "}
+                    {faixaSugeridaAtual.tamanho_faixa_original}
+                  </Text>
+
+                  <View style={{ marginTop: 8 }}>
+                    <Button
+                      title="Usar próxima faixa livre"
+                      onPress={usarFaixaSugeridaAtual}
+                    />
+                  </View>
+                </View>
+              ) : quantidadeAlocada ? (
+                <Text style={styles.aviso}>
+                  Nenhuma faixa livre comporta essa quantidade.
+                </Text>
+              ) : null}
+
+              <View style={{ marginBottom: 10 }}>
+                <Button
+                  title="Usar faixa inteira restante"
+                  onPress={usarFaixaInteiraRestante}
+                />
+              </View>
 
               <Text style={styles.label}>Posição inicial</Text>
               <TextInput
@@ -831,7 +828,6 @@ export default function DashboardScreen() {
                 value={posicaoInicial}
                 onChangeText={setPosicaoInicial}
                 keyboardType="numeric"
-                placeholder="1"
               />
 
               <Text style={styles.label}>Posição final</Text>
@@ -840,7 +836,6 @@ export default function DashboardScreen() {
                 value={posicaoFinal}
                 onChangeText={setPosicaoFinal}
                 keyboardType="numeric"
-                placeholder="300"
               />
 
               <DatePickerField
@@ -855,7 +850,7 @@ export default function DashboardScreen() {
                 value={tipoOcupacao}
                 onChange={setTipoOcupacao}
                 options={
-                  (bancadaSelecionada?.tipo || "").toLowerCase() === "bercario"
+                  bancadaSelecionada?.tipo === "bercario"
                     ? OPCOES_TIPO_OCUPACAO_BERCARIO
                     : OPCOES_TIPO_OCUPACAO_FINAL
                 }
@@ -863,81 +858,96 @@ export default function DashboardScreen() {
 
               <Button title="Registrar ocupação" onPress={handleRegistrarOcupacao} />
 
-              <Text style={styles.subsecao}>Registrar monitoramento</Text>
+              {bancadaSelecionada?.tipo === "bercario" && ocupacaoSelecionada && (
+                <>
+                  <Text style={styles.subsecao}>Transplante para final</Text>
 
-              <DateTimePickerField
-                label="Data e hora"
-                value={dataHoraMonitoramento}
-                onChange={setDataHoraMonitoramento}
-                placeholder="Selecionar data e hora do monitoramento"
-              />
+                  <Text style={styles.label}>Buscar bancada destino</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={buscaBancadaDestino}
+                    onChangeText={setBuscaBancadaDestino}
+                    placeholder="Ex: B1"
+                  />
 
-              <Text style={styles.label}>pH</Text>
-              <TextInput
-                style={styles.input}
-                value={ph}
-                onChangeText={setPh}
-                keyboardType="numeric"
-                placeholder="5.8"
-              />
+                  <SelectCardList
+                    title="Escolher bancada final"
+                    items={bancadasDestinoFiltradas}
+                    selectedId={bancadaDestinoId}
+                    onSelect={setBancadaDestinoId}
+                    emptyMessage="Nenhuma bancada final encontrada."
+                    getTitle={(item) => item.codigo}
+                    getSubtitle={(item) =>
+                      `${item.tipo} | ${item.status} | Setor ${item.setor_codigo}`
+                    }
+                  />
 
-              <Text style={styles.label}>CE</Text>
-              <TextInput
-                style={styles.input}
-                value={ce}
-                onChangeText={setCe}
-                keyboardType="numeric"
-                placeholder="1.4"
-              />
+                  <Text style={styles.label}>Quantidade transplantada</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={quantidadeTransplantada}
+                    onChangeText={setQuantidadeTransplantada}
+                    keyboardType="numeric"
+                  />
 
-              <Text style={styles.label}>Temperatura da água</Text>
-              <TextInput
-                style={styles.input}
-                value={temperaturaAgua}
-                onChangeText={setTemperaturaAgua}
-                keyboardType="numeric"
-                placeholder="22.5"
-              />
+                  {faixaSugeridaDestino ? (
+                    <View style={styles.cardSugestao}>
+                      <Text style={styles.cardTitulo}>Faixa sugerida no destino</Text>
+                      <Text>
+                        Usar de {faixaSugeridaDestino.inicio} até {faixaSugeridaDestino.fim}
+                      </Text>
+                      <Text>
+                        Dentro da faixa livre {faixaSugeridaDestino.faixa_original_inicio} até{" "}
+                        {faixaSugeridaDestino.faixa_original_fim}
+                      </Text>
 
-              <Text style={styles.label}>Observações</Text>
-              <TextInput
-                style={styles.input}
-                value={observacoes}
-                onChangeText={setObservacoes}
-                placeholder="Opcional"
-              />
+                      <View style={{ marginTop: 8 }}>
+                        <Button
+                          title="Usar próxima faixa livre no destino"
+                          onPress={usarFaixaSugeridaDestino}
+                        />
+                      </View>
+                    </View>
+                  ) : quantidadeTransplantada && bancadaDestinoId ? (
+                    <Text style={styles.aviso}>
+                      Nenhuma faixa livre no destino comporta essa quantidade.
+                    </Text>
+                  ) : null}
 
-              <Button
-                title="Registrar monitoramento"
-                onPress={handleRegistrarMonitoramento}
-              />
+                  <DatePickerField
+                    label="Data do transplante"
+                    value={dataTransplante}
+                    onChange={setDataTransplante}
+                    placeholder="Selecionar data"
+                  />
 
-              <Text style={styles.subsecao}>Histórico de monitoramentos</Text>
-              {monitoramentos.length === 0 ? (
-                <Text style={styles.aviso}>Nenhum monitoramento registrado.</Text>
-              ) : (
-                monitoramentos.map((item) => (
-                  <View key={item.id} style={styles.cardMonitoramento}>
-                    <Text style={styles.cardMonitoramentoTitulo}>{item.data_hora}</Text>
-                    <Text>pH: {item.ph}</Text>
-                    <Text>CE: {item.ce}</Text>
-                    <Text>Temp. água: {item.temperatura_agua ?? "-"}</Text>
-                    <Text>Obs.: {item.observacoes || "-"}</Text>
+                  <Text style={styles.label}>Posição inicial destino</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={posicaoInicialDestino}
+                    onChangeText={setPosicaoInicialDestino}
+                    keyboardType="numeric"
+                  />
+
+                  <Text style={styles.label}>Posição final destino</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={posicaoFinalDestino}
+                    onChangeText={setPosicaoFinalDestino}
+                    keyboardType="numeric"
+                  />
+
+                  <View style={styles.linhaSwitch}>
+                    <Text>Encerrar ocupação origem</Text>
+                    <Switch value={encerrarOrigem} onValueChange={setEncerrarOrigem} />
                   </View>
-                ))
+
+                  <Button title="Realizar transplante" onPress={handleTransplante} />
+                </>
               )}
 
-              <Text style={styles.subsecao}>Ações da ocupação selecionada</Text>
-              {!ocupacaoSelecionada ? (
-                <Text style={styles.aviso}>
-                  Selecione uma ocupação ativa acima para colher, transplantar ou registrar ocorrência.
-                </Text>
-              ) : (
+              {bancadaSelecionada?.tipo === "final" && ocupacaoSelecionada && (
                 <>
-                  <Text style={styles.destaque}>
-                    Ocupação selecionada: {ocupacaoSelecionada.id} | Faixa: {ocupacaoSelecionada.posicao_inicial}-{ocupacaoSelecionada.posicao_final}
-                  </Text>
-
                   <Text style={styles.subsecao}>Colheita</Text>
 
                   <DatePickerField
@@ -953,16 +963,14 @@ export default function DashboardScreen() {
                     value={quantidadeColhida}
                     onChangeText={setQuantidadeColhida}
                     keyboardType="numeric"
-                    placeholder="250"
                   />
 
-                  <Text style={styles.label}>Quantidade de perda</Text>
+                  <Text style={styles.label}>Quantidade perda</Text>
                   <TextInput
                     style={styles.input}
                     value={quantidadePerda}
                     onChangeText={setQuantidadePerda}
                     keyboardType="numeric"
-                    placeholder="10"
                   />
 
                   <OptionSelectField
@@ -979,182 +987,12 @@ export default function DashboardScreen() {
                     <Text style={styles.aviso}>Nenhuma colheita registrada.</Text>
                   ) : (
                     colheitas.map((item) => (
-                      <View key={item.id} style={styles.cardMonitoramento}>
-                        <Text style={styles.cardMonitoramentoTitulo}>{item.data_colheita}</Text>
+                      <View key={item.id} style={styles.card}>
+                        <Text style={styles.cardTitulo}>{item.id}</Text>
+                        <Text>Data: {item.data_colheita}</Text>
                         <Text>Qtd. colhida: {item.quantidade_colhida}</Text>
                         <Text>Qtd. perda: {item.quantidade_perda}</Text>
                         <Text>Tipo: {item.tipo_colheita}</Text>
-                      </View>
-                    ))
-                  )}
-
-                  {(bancadaSelecionada?.tipo || "").toLowerCase() === "bercario" && (
-                    <>
-                      <Text style={styles.subsecao}>Transplante</Text>
-
-                      <View style={styles.cardOrigem}>
-                        <Text style={styles.cardMonitoramentoTitulo}>
-                          Ocupação origem: {ocupacaoSelecionada?.id || "-"}
-                        </Text>
-                        <Text>Lote origem: {ocupacaoSelecionada?.lote_producao_id || "-"}</Text>
-                        <Text>
-                          Variedade: {obterLotePorId(ocupacaoSelecionada?.lote_producao_id)?.variedade_nome || "-"}
-                        </Text>
-                        <Text>
-                          Faixa origem: {ocupacaoSelecionada?.posicao_inicial || "-"} até{" "}
-                          {ocupacaoSelecionada?.posicao_final || "-"}
-                        </Text>
-                        <Text>Quantidade alocada: {ocupacaoSelecionada?.quantidade_alocada || "-"}</Text>
-                        <Text>Tipo ocupação: {ocupacaoSelecionada?.tipo_ocupacao || "-"}</Text>
-                        <Text style={styles.fluxoTexto}>{obterDescricaoFluxo()}</Text>
-                      </View>
-
-                      <Text style={styles.label}>Buscar bancada destino</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={buscaBancadaDestino}
-                        onChangeText={setBuscaBancadaDestino}
-                        placeholder="Ex: F01, final, vazia..."
-                      />
-
-                      {!buscaBancadaDestino.trim() && bancadasDestinoFiltradas.length >= 25 ? (
-                        <Text style={styles.aviso}>
-                          Exibindo as 25 primeiras bancadas priorizadas. Digite na busca para refinar.
-                        </Text>
-                      ) : null}
-
-                      <SelectCardList
-                        title="Escolha a bancada destino"
-                        items={bancadasDestinoFiltradas}
-                        selectedId={bancadaDestinoId}
-                        onSelect={setBancadaDestinoId}
-                        emptyMessage="Nenhuma bancada encontrada para essa busca."
-                        getTitle={(item) => item.codigo}
-                        getSubtitle={(item) => {
-                          const compativel = tiposDestinoPreferenciais.includes(
-                            (item.tipo || "").toLowerCase()
-                          );
-
-                          return `${item.tipo} | Capacidade: ${item.capacidade_total} | Status: ${item.status}${compativel ? " | Recomendado" : ""}`;
-                        }}
-                      />
-
-                      {bancadaDestinoId ? (
-                        <Text style={styles.destaque}>
-                          Bancada destino selecionada:{" "}
-                          {bancadas.find((item) => item.id === bancadaDestinoId)?.codigo || "-"}
-                        </Text>
-                      ) : null}
-
-                      <Text style={styles.label}>Quantidade transplantada</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={quantidadeTransplantada}
-                        onChangeText={setQuantidadeTransplantada}
-                        keyboardType="numeric"
-                        placeholder="300"
-                      />
-
-                      <DatePickerField
-                        label="Data do transplante"
-                        value={dataTransplante}
-                        onChange={setDataTransplante}
-                        placeholder="Selecionar data"
-                      />
-
-                      <Text style={styles.label}>Posição inicial destino</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={posicaoInicialDestino}
-                        onChangeText={setPosicaoInicialDestino}
-                        keyboardType="numeric"
-                        placeholder="1"
-                      />
-
-                      <Text style={styles.label}>Posição final destino</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={posicaoFinalDestino}
-                        onChangeText={setPosicaoFinalDestino}
-                        keyboardType="numeric"
-                        placeholder="300"
-                      />
-
-                      <View style={styles.linhaSwitch}>
-                        <Text>Encerrar ocupação de origem</Text>
-                        <Switch value={encerrarOrigem} onValueChange={setEncerrarOrigem} />
-                      </View>
-
-                      <Button title="Realizar transplante" onPress={handleTransplante} />
-                    </>
-                  )}
-
-                  <Text style={styles.subsecao}>Registrar ocorrência</Text>
-
-                  <OptionSelectField
-                    label="Tipo da ocorrência"
-                    value={tipoOcorrencia}
-                    onChange={setTipoOcorrencia}
-                    options={OPCOES_TIPO_OCORRENCIA}
-                  />
-
-                  <Text style={styles.label}>Descrição</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={descricaoOcorrencia}
-                    onChangeText={setDescricaoOcorrencia}
-                    placeholder="Descreva o problema"
-                  />
-
-                  <Text style={styles.label}>Ação corretiva</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={acaoCorretiva}
-                    onChangeText={setAcaoCorretiva}
-                    placeholder="Opcional"
-                  />
-
-                  <DateTimePickerField
-                    label="Data e hora"
-                    value={dataHoraOcorrencia}
-                    onChange={setDataHoraOcorrencia}
-                    placeholder="Selecionar data e hora da ocorrência"
-                  />
-
-                  <OptionSelectField
-                    label="Status"
-                    value={statusOcorrencia}
-                    onChange={setStatusOcorrencia}
-                    options={OPCOES_STATUS_OCORRENCIA}
-                  />
-
-                  <Button
-                    title="Registrar ocorrência"
-                    onPress={handleRegistrarOcorrencia}
-                  />
-
-                  <Text style={styles.subsecao}>Histórico de ocorrências</Text>
-                  {ocorrencias.length === 0 ? (
-                    <Text style={styles.aviso}>Nenhuma ocorrência registrada.</Text>
-                  ) : (
-                    ocorrencias.map((item) => (
-                      <View key={item.id} style={styles.cardMonitoramento}>
-                        <Text style={styles.cardMonitoramentoTitulo}>
-                          {item.tipo_ocorrencia.toUpperCase()}
-                        </Text>
-                        <Text>Data/hora: {item.data_hora}</Text>
-                        <Text>Descrição: {item.descricao}</Text>
-                        <Text>Ação corretiva: {item.acao_corretiva || "-"}</Text>
-                        <Text>Status: {item.status}</Text>
-
-                        {item.status !== "resolvida" && (
-                          <View style={{ marginTop: 8 }}>
-                            <Button
-                              title="Marcar como resolvida"
-                              onPress={() => handleResolverOcorrencia(item.id)}
-                            />
-                          </View>
-                        )}
                       </View>
                     ))
                   )}
@@ -1172,38 +1010,15 @@ export default function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 12
-  },
+  container: { flex: 1, padding: 12 },
   titulo: {
     fontSize: 24,
     fontWeight: "bold",
     textAlign: "center",
-    marginBottom: 4
-  },
-  subtitulo: {
-    textAlign: "center",
-    marginBottom: 12,
-    color: "#555"
-  },
-  legendaBox: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 10,
-    padding: 10,
     marginBottom: 12
   },
-  legendaTitulo: {
-    fontWeight: "bold",
-    marginBottom: 6
-  },
-  grade: {
-    paddingBottom: 20
-  },
-  linha: {
-    flexDirection: "row"
-  },
+  grade: { paddingBottom: 20 },
+  linha: { flexDirection: "row" },
   celula: {
     width: 74,
     height: 74,
@@ -1215,22 +1030,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 4
   },
-  celulaVazia: {
-    backgroundColor: "#ecf0f1"
-  },
-  codigo: {
-    fontWeight: "bold",
-    fontSize: 12,
-    textAlign: "center"
-  },
-  tipo: {
-    fontSize: 10,
-    textAlign: "center"
-  },
-  livre: {
-    fontSize: 10,
-    color: "#666"
-  },
+  celulaVazia: { backgroundColor: "#ecf0f1" },
+  codigo: { fontWeight: "bold", fontSize: 12, textAlign: "center" },
+  tipo: { fontSize: 10, textAlign: "center" },
+  livre: { fontSize: 10, color: "#666" },
   overlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.4)"
@@ -1263,19 +1066,6 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 6
   },
-  aviso: {
-    color: "#666",
-    marginBottom: 8
-  },
-  destaque: {
-    fontWeight: "bold",
-    marginBottom: 10
-  },
-  fluxoTexto: {
-    marginTop: 6,
-    fontWeight: "bold",
-    color: "#2e86de"
-  },
   input: {
     borderWidth: 1,
     borderColor: "#999",
@@ -1283,7 +1073,11 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 8
   },
-  cardMonitoramento: {
+  aviso: {
+    color: "#666",
+    marginBottom: 8
+  },
+  card: {
     borderWidth: 1,
     borderColor: "#ccc",
     borderRadius: 8,
@@ -1298,15 +1092,15 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 8
   },
-  cardOrigem: {
+  cardSugestao: {
     borderWidth: 1,
-    borderColor: "#7fb3d5",
-    backgroundColor: "#eef7fc",
+    borderColor: "#58d68d",
+    backgroundColor: "#eefaf1",
     borderRadius: 8,
     padding: 10,
     marginBottom: 10
   },
-  cardMonitoramentoTitulo: {
+  cardTitulo: {
     fontWeight: "bold",
     marginBottom: 4
   },
@@ -1316,33 +1110,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginVertical: 10
   },
-  legendaMiniMapa: {
-    flexDirection: "row",
-    gap: 14,
-    marginBottom: 8
+  badgeStatus: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginTop: 6,
+    marginBottom: 6
   },
-  legendaItem: {
-    flexDirection: "row",
-    alignItems: "center"
-  },
-  corLivre: {
-    width: 14,
-    height: 14,
-    borderRadius: 4,
-    backgroundColor: "#ecf0f1",
-    borderWidth: 1,
-    borderColor: "#bdc3c7",
-    marginRight: 6
-  },
-  corOcupado: {
-    width: 14,
-    height: 14,
-    borderRadius: 4,
-    backgroundColor: "#2e86de",
-    marginRight: 6
-  },
-  legendaMiniTexto: {
-    fontSize: 12,
-    color: "#555"
+  badgeStatusTexto: {
+    fontWeight: "bold",
+    fontSize: 12
   }
 });

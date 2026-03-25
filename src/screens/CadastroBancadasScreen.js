@@ -1,23 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  Button,
-  FlatList,
-  Modal,
-  StyleSheet,
+  View,
   Text,
   TextInput,
-  View
+  Button,
+  StyleSheet,
+  Modal,
+  ScrollView
 } from "react-native";
-import OptionSelectField from "../components/OptionSelectField";
-import SelectCardList from "../components/SelectCardList";
 import {
-  atualizarBancada,
   criarBancada,
   criarMultiplasBancadas,
-  excluirBancada,
-  listarBancadas
+  listarBancadas,
+  atualizarBancada,
+  excluirBancada
 } from "../services/bancadaService";
 import { listarSetores } from "../services/setorService";
+import OptionSelectField from "../components/OptionSelectField";
+import SelectCardList from "../components/SelectCardList";
 
 export default function CadastroBancadasScreen({ onVoltar }) {
   const [setores, setSetores] = useState([]);
@@ -172,7 +172,11 @@ export default function CadastroBancadasScreen({ onVoltar }) {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.container}
+      showsVerticalScrollIndicator={true}
+    >
       <Button title="Voltar" onPress={onVoltar} />
 
       <Text style={styles.titulo}>CRUD de Bancadas</Text>
@@ -268,88 +272,107 @@ export default function CadastroBancadasScreen({ onVoltar }) {
 
       <Text style={styles.subtitulo}>Bancadas cadastradas</Text>
 
-      <FlatList
-        data={bancadas}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <Text style={styles.cardTitulo}>{item.codigo}</Text>
-            <Text>Setor: {item.setor_codigo}</Text>
-            <Text>Tipo: {item.tipo}</Text>
-            <Text>Capacidade: {item.capacidade_total}</Text>
-            <Text>Status: {item.status}</Text>
-            <Text>Posição: ({item.x}, {item.y})</Text>
+      {bancadas.map((item) => (
+        <View key={item.id} style={styles.card}>
+          <Text style={styles.cardTitulo}>{item.codigo}</Text>
+          <Text>Setor: {item.setor_codigo}</Text>
+          <Text>Tipo: {item.tipo}</Text>
+          <Text>Capacidade: {item.capacidade_total}</Text>
+          <Text>Status: {item.status}</Text>
+          <Text>
+            Posição: ({item.x}, {item.y})
+          </Text>
 
-            <View style={styles.linha}>
-              <View style={styles.botao}>
-                <Button title="Editar" onPress={() => abrirEdicao(item)} />
-              </View>
-              <View style={styles.botao}>
-                <Button title="Excluir" onPress={() => handleExcluir(item.id)} />
-              </View>
+          <View style={styles.linha}>
+            <View style={styles.botao}>
+              <Button title="Editar" onPress={() => abrirEdicao(item)} />
+            </View>
+            <View style={styles.botao}>
+              <Button title="Excluir" onPress={() => handleExcluir(item.id)} />
             </View>
           </View>
-        )}
-      />
+        </View>
+      ))}
 
       <Modal visible={modalVisible} transparent animationType="slide">
         <View style={styles.overlay}>
-          <View style={styles.modal}>
-            <Text style={styles.titulo}>Editar {itemEditando?.codigo}</Text>
+          <ScrollView contentContainerStyle={styles.modalScroll}>
+            <View style={styles.modal}>
+              <Text style={styles.titulo}>Editar {itemEditando?.codigo}</Text>
 
-            <OptionSelectField
-              label="Tipo"
-              value={editTipo}
-              onChange={setEditTipo}
-              options={OPCOES_TIPO_BANCADA}
-            />
+              <OptionSelectField
+                label="Tipo"
+                value={editTipo}
+                onChange={setEditTipo}
+                options={OPCOES_TIPO_BANCADA}
+              />
 
-            <Text style={styles.label}>Capacidade</Text>
-            <TextInput
-              style={styles.input}
-              value={editCapacidade}
-              onChangeText={setEditCapacidade}
-              keyboardType="numeric"
-            />
+              <Text style={styles.label}>Capacidade</Text>
+              <TextInput
+                style={styles.input}
+                value={editCapacidade}
+                onChangeText={setEditCapacidade}
+                keyboardType="numeric"
+              />
 
-            <OptionSelectField
-              label="Status"
-              value={editStatus}
-              onChange={setEditStatus}
-              options={OPCOES_STATUS_BANCADA}
-            />
+              <OptionSelectField
+                label="Status"
+                value={editStatus}
+                onChange={setEditStatus}
+                options={OPCOES_STATUS_BANCADA}
+              />
 
-            <Text style={styles.label}>Posição X</Text>
-            <TextInput
-              style={styles.input}
-              value={editX}
-              onChangeText={setEditX}
-              keyboardType="numeric"
-            />
+              <Text style={styles.label}>Posição X</Text>
+              <TextInput
+                style={styles.input}
+                value={editX}
+                onChangeText={setEditX}
+                keyboardType="numeric"
+              />
 
-            <Text style={styles.label}>Posição Y</Text>
-            <TextInput
-              style={styles.input}
-              value={editY}
-              onChangeText={setEditY}
-              keyboardType="numeric"
-            />
+              <Text style={styles.label}>Posição Y</Text>
+              <TextInput
+                style={styles.input}
+                value={editY}
+                onChangeText={setEditY}
+                keyboardType="numeric"
+              />
 
-            <Button title="Salvar" onPress={salvarEdicao} />
-            <View style={{ height: 10 }} />
-            <Button title="Fechar" onPress={() => setModalVisible(false)} />
-          </View>
+              <Button title="Salvar" onPress={salvarEdicao} />
+              <View style={{ height: 10 }} />
+              <Button title="Fechar" onPress={() => setModalVisible(false)} />
+            </View>
+          </ScrollView>
         </View>
       </Modal>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16 },
-  titulo: { fontSize: 22, fontWeight: "bold", textAlign: "center", marginVertical: 16 },
-  subtitulo: { fontSize: 18, fontWeight: "bold", marginVertical: 16 },
-  label: { fontWeight: "bold", marginTop: 8, marginBottom: 4 },
+  scroll: {
+    flex: 1
+  },
+  container: {
+    padding: 16,
+    paddingBottom: 40
+  },
+  titulo: {
+    fontSize: 22,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginVertical: 16
+  },
+  subtitulo: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginVertical: 16
+  },
+  label: {
+    fontWeight: "bold",
+    marginTop: 8,
+    marginBottom: 4
+  },
   input: {
     borderWidth: 1,
     borderColor: "#999",
@@ -390,11 +413,15 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center"
+  },
+  modalScroll: {
+    flexGrow: 1,
     justifyContent: "center",
-    alignItems: "center"
+    padding: 16
   },
   modal: {
-    width: "90%",
+    width: "100%",
     backgroundColor: "#fff",
     padding: 20,
     borderRadius: 10

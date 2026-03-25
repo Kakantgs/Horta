@@ -202,5 +202,40 @@ export async function atualizarBancada(id, dados) {
 }
 
 export async function excluirBancada(id) {
+  const [ocupacoesSnapshot, colheitasSnapshot] = await Promise.all([
+    get(ref(db, "ocupacoes_bancada")),
+    get(ref(db, "colheitas"))
+  ]);
+
+  const ocupacoes = ocupacoesSnapshot.exists()
+    ? Object.values(ocupacoesSnapshot.val())
+    : [];
+
+  const colheitas = colheitasSnapshot.exists()
+    ? Object.values(colheitasSnapshot.val())
+    : [];
+
+  const ocupacoesDaBancada = ocupacoes.filter((item) => item.bancada_id === id);
+
+  if (ocupacoesDaBancada.length > 0) {
+    const existeAtiva = ocupacoesDaBancada.some((item) => item.status === "ativa");
+
+    if (existeAtiva) {
+      throw new Error("Não é possível excluir a bancada porque ela possui ocupação ativa.");
+    }
+
+    throw new Error("Não é possível excluir a bancada porque ela possui histórico de ocupações.");
+  }
+
+  const ocupacaoIds = ocupacoesDaBancada.map((item) => item.id);
+
+  const existeColheitaVinculada = colheitas.some((item) =>
+    ocupacaoIds.includes(item.ocupacao_bancada_id)
+  );
+
+  if (existeColheitaVinculada) {
+    throw new Error("Não é possível excluir a bancada porque ela possui colheitas vinculadas.");
+  }
+
   await remove(ref(db, `bancadas/${id}`));
 }

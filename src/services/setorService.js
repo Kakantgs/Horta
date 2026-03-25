@@ -72,21 +72,39 @@ export async function atualizarSetor(id, dados) {
 }
 
 export async function excluirSetor(id) {
-  const bancadasSnapshot = await get(ref(db, "bancadas"));
+  const [bancadasSnapshot, monitoramentosSnapshot, ocorrenciasSnapshot] =
+    await Promise.all([
+      get(ref(db, "bancadas")),
+      get(ref(db, "monitoramentos_setor")),
+      get(ref(db, "ocorrencias_setor"))
+    ]);
+
   const bancadas = bancadasSnapshot.exists()
     ? Object.values(bancadasSnapshot.val())
     : [];
 
-  const existeBancadaNoSetor = bancadas.some((item) => item.setor_id === id);
+  const monitoramentos = monitoramentosSnapshot.exists()
+    ? Object.values(monitoramentosSnapshot.val())
+    : [];
 
+  const ocorrencias = ocorrenciasSnapshot.exists()
+    ? Object.values(ocorrenciasSnapshot.val())
+    : [];
+
+  const existeBancadaNoSetor = bancadas.some((item) => item.setor_id === id);
   if (existeBancadaNoSetor) {
     throw new Error("Não é possível excluir um setor que possui bancadas vinculadas.");
   }
 
-  await remove(ref(db, `setores/${id}`));
-}
+  const existeMonitoramento = monitoramentos.some((item) => item.setor_id === id);
+  if (existeMonitoramento) {
+    throw new Error("Não é possível excluir um setor que possui monitoramentos vinculados.");
+  }
 
-export async function buscarSetorPorId(id) {
-  const snapshot = await get(ref(db, `setores/${id}`));
-  return snapshot.exists() ? snapshot.val() : null;
+  const existeOcorrencia = ocorrencias.some((item) => item.setor_id === id);
+  if (existeOcorrencia) {
+    throw new Error("Não é possível excluir um setor que possui ocorrências vinculadas.");
+  }
+
+  await remove(ref(db, `setores/${id}`));
 }

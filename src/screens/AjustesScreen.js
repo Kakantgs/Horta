@@ -1,68 +1,176 @@
 import React, { useState } from "react";
-import { View, Text, Button, StyleSheet } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Button,
+  ScrollView
+} from "react-native";
+
+import CadastroSetoresScreen from "./CadastroSetoresScreen";
 import CadastroBancadasScreen from "./CadastroBancadasScreen";
+import MonitoramentoSetoresScreen from "./MonitoramentoSetoresScreen";
+import OcorrenciasSetoresScreen from "./OcorrenciasSetoresScreen";
 import CadastroFornecedoresScreen from "./CadastroFornecedoresScreen";
 import CadastroClientesScreen from "./CadastroClientesScreen";
 import CadastroVariedadesScreen from "./CadastroVariedadesScreen";
 import DadosUnidadeScreen from "./DadosUnidadeScreen";
 
 export default function AjustesScreen() {
-  const [modulo, setModulo] = useState("menu");
+  const [telaAtual, setTelaAtual] = useState("menu");
 
-  if (modulo === "bancadas") {
-    return <CadastroBancadasScreen onVoltar={() => setModulo("menu")} />;
+  if (telaAtual === "setores") {
+    return <CadastroSetoresScreen onVoltar={() => setTelaAtual("menu")} />;
   }
 
-  if (modulo === "fornecedores") {
-    return <CadastroFornecedoresScreen onVoltar={() => setModulo("menu")} />;
+  if (telaAtual === "bancadas") {
+    return <CadastroBancadasScreen onVoltar={() => setTelaAtual("menu")} />;
   }
 
-  if (modulo === "clientes") {
-    return <CadastroClientesScreen onVoltar={() => setModulo("menu")} />;
+  if (telaAtual === "monitoramento_setor") {
+    return (
+      <View style={{ flex: 1 }}>
+        <View style={{ padding: 16 }}>
+          <Button title="Voltar" onPress={() => setTelaAtual("menu")} />
+        </View>
+        <MonitoramentoSetoresScreen />
+      </View>
+    );
   }
 
-  if (modulo === "variedades") {
-    return <CadastroVariedadesScreen onVoltar={() => setModulo("menu")} />;
+  if (telaAtual === "ocorrencias_setor") {
+    return (
+      <View style={{ flex: 1 }}>
+        <View style={{ padding: 16 }}>
+          <Button title="Voltar" onPress={() => setTelaAtual("menu")} />
+        </View>
+        <OcorrenciasSetoresScreen />
+      </View>
+    );
   }
 
-  if (modulo === "unidade") {
-    return <DadosUnidadeScreen onVoltar={() => setModulo("menu")} />;
+  if (telaAtual === "fornecedores") {
+    return <CadastroFornecedoresScreen onVoltar={() => setTelaAtual("menu")} />;
+  }
+
+  if (telaAtual === "clientes") {
+    return <CadastroClientesScreen onVoltar={() => setTelaAtual("menu")} />;
+  }
+
+  if (telaAtual === "variedades") {
+    return <CadastroVariedadesScreen onVoltar={() => setTelaAtual("menu")} />;
+  }
+
+  if (telaAtual === "dados_unidade") {
+    return <DadosUnidadeScreen onVoltar={() => setTelaAtual("menu")} />;
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.titulo}>Ajustes</Text>
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.titulo}>Ajustes do Sistema</Text>
+      <Text style={styles.subtitulo}>
+        Cadastros e operações administrativas
+      </Text>
 
-      <Button title="Dados da Unidade" onPress={() => setModulo("unidade")} />
-      <View style={styles.espaco} />
+      <View style={styles.bloco}>
+        <Text style={styles.blocoTitulo}>Estrutura</Text>
 
-      <Button title="CRUD de Bancadas" onPress={() => setModulo("bancadas")} />
-      <View style={styles.espaco} />
+        <View style={styles.botao}>
+          <Button
+            title="CRUD de Setores"
+            onPress={() => setTelaAtual("setores")}
+          />
+        </View>
 
-      <Button title="Cadastro de Fornecedores" onPress={() => setModulo("fornecedores")} />
-      <View style={styles.espaco} />
+        <View style={styles.botao}>
+          <Button
+            title="CRUD de Bancadas"
+            onPress={() => setTelaAtual("bancadas")}
+          />
+        </View>
+      </View>
 
-      <Button title="Cadastro de Clientes" onPress={() => setModulo("clientes")} />
-      <View style={styles.espaco} />
+      <View style={styles.bloco}>
+        <Text style={styles.blocoTitulo}>Monitoramento Operacional</Text>
 
-      <Button title="Cadastro de Variedades" onPress={() => setModulo("variedades")} />
-    </View>
+        <View style={styles.botao}>
+          <Button
+            title="Monitoramento por Setor"
+            onPress={() => setTelaAtual("monitoramento_setor")}
+          />
+        </View>
+
+        <View style={styles.botao}>
+          <Button
+            title="Ocorrências por Setor"
+            onPress={() => setTelaAtual("ocorrencias_setor")}
+          />
+        </View>
+      </View>
+
+      <View style={styles.bloco}>
+        <Text style={styles.blocoTitulo}>Cadastros Base</Text>
+
+        <View style={styles.botao}>
+          <Button
+            title="Fornecedores"
+            onPress={() => setTelaAtual("fornecedores")}
+          />
+        </View>
+
+        <View style={styles.botao}>
+          <Button
+            title="Clientes"
+            onPress={() => setTelaAtual("clientes")}
+          />
+        </View>
+
+        <View style={styles.botao}>
+          <Button
+            title="Variedades"
+            onPress={() => setTelaAtual("variedades")}
+          />
+        </View>
+
+        <View style={styles.botao}>
+          <Button
+            title="Dados da Unidade"
+            onPress={() => setTelaAtual("dados_unidade")}
+          />
+        </View>
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    justifyContent: "center",
-    padding: 20
+    padding: 16
   },
   titulo: {
     fontSize: 24,
     fontWeight: "bold",
     textAlign: "center",
+    marginBottom: 8
+  },
+  subtitulo: {
+    textAlign: "center",
+    color: "#666",
     marginBottom: 20
   },
-  espaco: {
-    height: 12
+  bloco: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 16
+  },
+  blocoTitulo: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 12
+  },
+  botao: {
+    marginBottom: 10
   }
 });

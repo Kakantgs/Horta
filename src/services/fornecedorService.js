@@ -30,5 +30,17 @@ export async function atualizarFornecedor(id, dados) {
 }
 
 export async function excluirFornecedor(id) {
+  const entradasSnapshot = await get(ref(db, "entradas"));
+
+  const entradas = entradasSnapshot.exists()
+    ? Object.values(entradasSnapshot.val())
+    : [];
+
+  const existeEntrada = entradas.some((item) => item.fornecedor_id === id);
+
+  if (existeEntrada) {
+    throw new Error("Não é possível excluir o fornecedor porque ele possui entradas vinculadas.");
+  }
+
   await remove(ref(db, `fornecedores/${id}`));
 }

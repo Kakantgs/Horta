@@ -30,5 +30,17 @@ export async function atualizarCliente(id, dados) {
 }
 
 export async function excluirCliente(id) {
+  const pedidosSnapshot = await get(ref(db, "pedidos_venda"));
+
+  const pedidos = pedidosSnapshot.exists()
+    ? Object.values(pedidosSnapshot.val())
+    : [];
+
+  const existePedido = pedidos.some((item) => item.cliente_id === id);
+
+  if (existePedido) {
+    throw new Error("Não é possível excluir o cliente porque ele possui pedidos de venda vinculados.");
+  }
+
   await remove(ref(db, `clientes/${id}`));
 }
