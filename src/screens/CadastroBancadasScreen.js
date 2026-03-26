@@ -13,7 +13,9 @@ import {
   criarMultiplasBancadas,
   listarBancadas,
   atualizarBancada,
-  excluirBancada
+  excluirBancada,
+  inativarBancada,
+  reativarBancada
 } from "../services/bancadaService";
 import { listarSetores } from "../services/setorService";
 import OptionSelectField from "../components/OptionSelectField";
@@ -171,6 +173,26 @@ export default function CadastroBancadasScreen({ onVoltar }) {
     }
   }
 
+  async function handleInativar(id) {
+    try {
+      await inativarBancada(id);
+      alert("Bancada inativada com sucesso!");
+      carregar();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+
+  async function handleReativar(id) {
+    try {
+      await reativarBancada(id);
+      alert("Bancada reativada com sucesso!");
+      carregar();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+
   return (
     <ScrollView
       style={styles.scroll}
@@ -282,11 +304,23 @@ export default function CadastroBancadasScreen({ onVoltar }) {
           <Text>
             Posição: ({item.x}, {item.y})
           </Text>
+          <Text>Ativa: {item.active === false ? "Não" : "Sim"}</Text>
 
           <View style={styles.linha}>
             <View style={styles.botao}>
               <Button title="Editar" onPress={() => abrirEdicao(item)} />
             </View>
+
+            {item.active === false ? (
+              <View style={styles.botao}>
+                <Button title="Reativar" onPress={() => handleReativar(item.id)} />
+              </View>
+            ) : (
+              <View style={styles.botao}>
+                <Button title="Inativar" onPress={() => handleInativar(item.id)} />
+              </View>
+            )}
+
             <View style={styles.botao}>
               <Button title="Excluir" onPress={() => handleExcluir(item.id)} />
             </View>

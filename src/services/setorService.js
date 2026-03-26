@@ -53,6 +53,11 @@ export async function listarSetores() {
   );
 }
 
+export async function buscarSetorPorId(id) {
+  const snapshot = await get(ref(db, `setores/${id}`));
+  return snapshot.exists() ? snapshot.val() : null;
+}
+
 export async function atualizarSetor(id, dados) {
   const payload = { ...dados };
 
@@ -107,4 +112,30 @@ export async function excluirSetor(id) {
   }
 
   await remove(ref(db, `setores/${id}`));
+}
+
+export async function inativarSetor(id) {
+  const bancadasSnapshot = await get(ref(db, "bancadas"));
+
+  const bancadas = bancadasSnapshot.exists()
+    ? Object.values(bancadasSnapshot.val())
+    : [];
+
+  const existeBancadaAtiva = bancadas.some(
+    (item) => item.setor_id === id && item.active !== false
+  );
+
+  if (existeBancadaAtiva) {
+    throw new Error("Não é possível inativar o setor porque ele ainda possui bancadas ativas.");
+  }
+
+  await update(ref(db, `setores/${id}`), {
+    ativo: false
+  });
+}
+
+export async function reativarSetor(id) {
+  await update(ref(db, `setores/${id}`), {
+    ativo: true
+  });
 }

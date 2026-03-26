@@ -5,14 +5,16 @@ import {
   TextInput,
   Button,
   StyleSheet,
-  FlatList,
-  Modal
+  Modal,
+  ScrollView
 } from "react-native";
 import {
   criarCliente,
-  listarClientes,
+  listarClientesCadastro,
   atualizarCliente,
-  excluirCliente
+  excluirCliente,
+  inativarCliente,
+  reativarCliente
 } from "../services/clienteService";
 
 export default function CadastroClientesScreen({ onVoltar }) {
@@ -34,7 +36,7 @@ export default function CadastroClientesScreen({ onVoltar }) {
   }, []);
 
   async function carregar() {
-    const lista = await listarClientes();
+    const lista = await listarClientesCadastro();
     setItens(lista);
   }
 
@@ -100,16 +102,37 @@ export default function CadastroClientesScreen({ onVoltar }) {
     }
   }
 
+  async function handleInativar(id) {
+    try {
+      await inativarCliente(id);
+      alert("Cliente inativado com sucesso!");
+      carregar();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+
+  async function handleReativar(id) {
+    try {
+      await reativarCliente(id);
+      alert("Cliente reativado com sucesso!");
+      carregar();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       <Button title="Voltar" onPress={onVoltar} />
+
       <Text style={styles.titulo}>Cadastro de Clientes</Text>
 
       <Text style={styles.label}>Nome</Text>
       <TextInput style={styles.input} value={nome} onChangeText={setNome} />
 
-      <Text style={styles.label}>Tipo do Cliente</Text>
-      <TextInput style={styles.input} value={tipoCliente} onChangeText={setTipoCliente} placeholder="mercado, restaurante..." />
+      <Text style={styles.label}>Tipo do cliente</Text>
+      <TextInput style={styles.input} value={tipoCliente} onChangeText={setTipoCliente} />
 
       <Text style={styles.label}>Telefone</Text>
       <TextInput style={styles.input} value={telefone} onChangeText={setTelefone} />
@@ -121,58 +144,70 @@ export default function CadastroClientesScreen({ onVoltar }) {
 
       <Text style={styles.subtitulo}>Clientes cadastrados</Text>
 
-      <FlatList
-        data={itens}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <Text style={styles.cardTitulo}>{item.nome}</Text>
-            <Text>Tipo: {item.tipo_cliente}</Text>
-            <Text>Telefone: {item.telefone}</Text>
-            <Text>Email: {item.email}</Text>
+      {itens.map((item) => (
+        <View key={item.id} style={styles.card}>
+          <Text style={styles.cardTitulo}>{item.nome}</Text>
+          <Text>Tipo: {item.tipo_cliente}</Text>
+          <Text>Telefone: {item.telefone}</Text>
+          <Text>Email: {item.email}</Text>
+          <Text>Ativo: {item.ativo === false ? "Não" : "Sim"}</Text>
 
-            <View style={styles.linha}>
+          <View style={styles.linha}>
+            <View style={styles.botao}>
+              <Button title="Editar" onPress={() => abrirEdicao(item)} />
+            </View>
+
+            {item.ativo === false ? (
               <View style={styles.botao}>
-                <Button title="Editar" onPress={() => abrirEdicao(item)} />
+                <Button title="Reativar" onPress={() => handleReativar(item.id)} />
               </View>
+            ) : (
               <View style={styles.botao}>
-                <Button title="Excluir" onPress={() => handleExcluir(item.id)} />
+                <Button title="Inativar" onPress={() => handleInativar(item.id)} />
               </View>
+            )}
+
+            <View style={styles.botao}>
+              <Button title="Excluir" onPress={() => handleExcluir(item.id)} />
             </View>
           </View>
-        )}
-      />
+        </View>
+      ))}
 
       <Modal visible={modalVisible} transparent animationType="slide">
         <View style={styles.overlay}>
-          <View style={styles.modal}>
-            <Text style={styles.titulo}>Editar Cliente</Text>
+          <ScrollView contentContainerStyle={styles.modalScroll}>
+            <View style={styles.modal}>
+              <Text style={styles.titulo}>Editar Cliente</Text>
 
-            <TextInput style={styles.input} value={editNome} onChangeText={setEditNome} />
-            <TextInput style={styles.input} value={editTipoCliente} onChangeText={setEditTipoCliente} />
-            <TextInput style={styles.input} value={editTelefone} onChangeText={setEditTelefone} />
-            <TextInput style={styles.input} value={editEmail} onChangeText={setEditEmail} />
+              <TextInput style={styles.input} value={editNome} onChangeText={setEditNome} />
+              <TextInput style={styles.input} value={editTipoCliente} onChangeText={setEditTipoCliente} />
+              <TextInput style={styles.input} value={editTelefone} onChangeText={setEditTelefone} />
+              <TextInput style={styles.input} value={editEmail} onChangeText={setEditEmail} />
 
-            <Button title="Salvar" onPress={salvarEdicao} />
-            <View style={{ height: 10 }} />
-            <Button title="Fechar" onPress={() => setModalVisible(false)} />
-          </View>
+              <Button title="Salvar" onPress={salvarEdicao} />
+              <View style={{ height: 10 }} />
+              <Button title="Fechar" onPress={() => setModalVisible(false)} />
+            </View>
+          </ScrollView>
         </View>
       </Modal>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16 },
+  scroll: { flex: 1 },
+  container: { flexGrow: 1, padding: 16, paddingBottom: 40 },
   titulo: { fontSize: 22, fontWeight: "bold", textAlign: "center", marginVertical: 16 },
   subtitulo: { fontSize: 18, fontWeight: "bold", marginVertical: 16 },
   label: { fontWeight: "bold", marginTop: 8, marginBottom: 4 },
   input: { borderWidth: 1, borderColor: "#999", borderRadius: 8, padding: 10, marginBottom: 8 },
   card: { borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 12, marginBottom: 10 },
   cardTitulo: { fontWeight: "bold", fontSize: 16, marginBottom: 4 },
-  linha: { flexDirection: "row", marginTop: 10 },
-  botao: { marginRight: 10 },
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", alignItems: "center" },
-  modal: { width: "90%", backgroundColor: "#fff", padding: 20, borderRadius: 10 }
+  linha: { flexDirection: "row", marginTop: 10, flexWrap: "wrap" },
+  botao: { marginRight: 10, marginBottom: 8 },
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center" },
+  modalScroll: { flexGrow: 1, justifyContent: "center", padding: 16 },
+  modal: { width: "100%", backgroundColor: "#fff", padding: 20, borderRadius: 10 }
 });

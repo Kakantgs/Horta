@@ -1,27 +1,31 @@
-import { get, ref } from "firebase/database";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  Button,
-  Modal,
-  ScrollView,
-  StyleSheet,
+  View,
   Text,
   TextInput,
+  Button,
+  StyleSheet,
+  ScrollView,
   TouchableOpacity,
-  View
+  Modal
 } from "react-native";
+import { get, ref } from "firebase/database";
+import { db } from "../config/firebaseConfig";
+import {
+  registrarEntradaComLote,
+  listarEntradas,
+  validarDataISO
+} from "../services/entradaService";
+import { calcularResumoLotes } from "../services/saldoLoteService";
+import { listarBancadas } from "../services/bancadaService";
+import { registrarOcupacaoBancada } from "../services/ocupacaoService";
+import {
+  calcularDiasDesdeEntrada,
+  obterStatusVisualLote
+} from "../services/statusLoteService";
 import DatePickerField from "../components/DatePickerField";
 import OptionSelectField from "../components/OptionSelectField";
 import SelectCardList from "../components/SelectCardList";
-import { db } from "../config/firebaseConfig";
-import { listarBancadas } from "../services/bancadaService";
-import {
-  listarEntradas,
-  registrarEntradaComLote,
-  validarDataISO
-} from "../services/entradaService";
-import { registrarOcupacaoBancada } from "../services/ocupacaoService";
-import { calcularResumoLotes } from "../services/saldoLoteService";
 
 export default function EntradaScreen() {
   const [fornecedores, setFornecedores] = useState([]);
@@ -64,14 +68,19 @@ export default function EntradaScreen() {
 
   async function carregarTudo() {
     try {
-      const [fornecedoresSnapshot, variedadesSnapshot, listaLotes, listaEntradas, listaBancadas] =
-        await Promise.all([
-          get(ref(db, "fornecedores")),
-          get(ref(db, "variedades")),
-          calcularResumoLotes(),
-          listarEntradas(),
-          listarBancadas()
-        ]);
+      const [
+        fornecedoresSnapshot,
+        variedadesSnapshot,
+        listaLotes,
+        listaEntradas,
+        listaBancadas
+      ] = await Promise.all([
+        get(ref(db, "fornecedores")),
+        get(ref(db, "variedades")),
+        calcularResumoLotes(),
+        listarEntradas(),
+        listarBancadas()
+      ]);
 
       setFornecedores(
         fornecedoresSnapshot.exists() ? Object.values(fornecedoresSnapshot.val()) : []
@@ -125,6 +134,18 @@ export default function EntradaScreen() {
       setPosicaoFinal(String(qtd));
     }
   }, [bancadaSelecionada, quantidadeAlocada]);
+
+  function obterStatusVisualEntrada(lote) {
+    const diasEntrada = calcularDiasDesdeEntrada(lote.data_formacao);
+
+    return obterStatusVisualLote({
+      lote,
+      bancadaTipo: lote.total_alocado_em_bancadas > 0 ? "bercario" : "",
+      diasDesdeEntrada: diasEntrada,
+      diasNaOcupacao: diasEntrada,
+      temColheita: false
+    });
+  }
 
   async function handleRegistrar() {
     try {
@@ -356,7 +377,9 @@ export default function EntradaScreen() {
           <Text>Total alocado em bancadas: {item.total_alocado_em_bancadas}</Text>
           <Text>Total em produção: {item.total_em_producao}</Text>
           <Text>Tipo do lote: {item.tipo_lote}</Text>
-          <Text>Status: {item.status}</Text>
+          <Text>Status do banco: {item.status}</Text>
+          <Text>Status visual: {obterStatusVisualEntrada(item)}</Text>
+          <Text>Dias desde a entrada: {calcularDiasDesdeEntrada(item.data_formacao)}</Text>
         </View>
       ))}
 
@@ -377,75 +400,80 @@ export default function EntradaScreen() {
 
       <Modal visible={modalOcupacaoVisible} transparent animationType="slide">
         <View style={styles.overlay}>
-          <View style={styles.modal}>
-            <Text style={styles.tituloModal}>Ocupar lote agora?</Text>
+          <ScrollView
+            contentContainerStyle={styles.modalScroll}
+            showsVerticalScrollIndicator={true}
+          >
+            <View style={styles.modal}>
+              <Text style={styles.tituloModal}>Ocupar lote agora?</Text>
 
-            <Text style={styles.modalTexto}>
-              Lote: {novoLoteCriado?.codigo_lote || "-"}
-            </Text>
-            <Text style={styles.modalTexto}>
-              Variedade: {novoLoteCriado?.variedade_nome || "-"}
-            </Text>
-            <Text style={styles.modalTexto}>
-              Quantidade inicial: {novoLoteCriado?.quantidade_inicial || "-"}
-            </Text>
-
-            <SelectCardList
-              title="Escolha a bancada"
-              items={bancadas}
-              selectedId={bancadaSelecionadaId}
-              onSelect={setBancadaSelecionadaId}
-              emptyMessage="Nenhuma bancada cadastrada."
-              getTitle={(item) => item.codigo}
-              getSubtitle={(item) =>
-                `${item.tipo} | Capacidade: ${item.capacidade_total} | Status: ${item.status}`
-              }
-            />
-
-            {bancadaSelecionada ? (
-              <Text style={styles.selecionado}>
-                Tipo de ocupação:{" "}
-                {bancadaSelecionada.tipo === "bercario"
-                  ? "bercario"
-                  : "entrada_direta_final"}
+              <Text style={styles.modalTexto}>
+                Lote: {novoLoteCriado?.codigo_lote || "-"}
               </Text>
-            ) : null}
+              <Text style={styles.modalTexto}>
+                Variedade: {novoLoteCriado?.variedade_nome || "-"}
+              </Text>
+              <Text style={styles.modalTexto}>
+                Quantidade inicial: {novoLoteCriado?.quantidade_inicial || "-"}
+              </Text>
 
-            <Text style={styles.label}>Quantidade alocada</Text>
-            <TextInput
-              style={styles.input}
-              value={quantidadeAlocada}
-              onChangeText={setQuantidadeAlocada}
-              keyboardType="numeric"
-            />
+              <SelectCardList
+                title="Escolha a bancada"
+                items={bancadas}
+                selectedId={bancadaSelecionadaId}
+                onSelect={setBancadaSelecionadaId}
+                emptyMessage="Nenhuma bancada cadastrada."
+                getTitle={(item) => item.codigo}
+                getSubtitle={(item) =>
+                  `${item.tipo} | Capacidade: ${item.capacidade_total} | Status: ${item.status}`
+                }
+              />
 
-            <Text style={styles.label}>Posição inicial</Text>
-            <TextInput
-              style={styles.input}
-              value={posicaoInicial}
-              onChangeText={setPosicaoInicial}
-              keyboardType="numeric"
-            />
+              {bancadaSelecionada ? (
+                <Text style={styles.selecionado}>
+                  Tipo de ocupação:{" "}
+                  {bancadaSelecionada.tipo === "bercario"
+                    ? "bercario"
+                    : "entrada_direta_final"}
+                </Text>
+              ) : null}
 
-            <Text style={styles.label}>Posição final</Text>
-            <TextInput
-              style={styles.input}
-              value={posicaoFinal}
-              onChangeText={setPosicaoFinal}
-              keyboardType="numeric"
-            />
+              <Text style={styles.label}>Quantidade alocada</Text>
+              <TextInput
+                style={styles.input}
+                value={quantidadeAlocada}
+                onChangeText={setQuantidadeAlocada}
+                keyboardType="numeric"
+              />
 
-            <DatePickerField
-              label="Data de início"
-              value={dataInicioOcupacao}
-              onChange={setDataInicioOcupacao}
-              placeholder="Selecionar data"
-            />
+              <Text style={styles.label}>Posição inicial</Text>
+              <TextInput
+                style={styles.input}
+                value={posicaoInicial}
+                onChangeText={setPosicaoInicial}
+                keyboardType="numeric"
+              />
 
-            <Button title="Ocupar agora" onPress={handleOcuparAgora} />
-            <View style={{ height: 10 }} />
-            <Button title="Deixar para depois" onPress={fecharModalSemOcupar} />
-          </View>
+              <Text style={styles.label}>Posição final</Text>
+              <TextInput
+                style={styles.input}
+                value={posicaoFinal}
+                onChangeText={setPosicaoFinal}
+                keyboardType="numeric"
+              />
+
+              <DatePickerField
+                label="Data de início"
+                value={dataInicioOcupacao}
+                onChange={setDataInicioOcupacao}
+                placeholder="Selecionar data"
+              />
+
+              <Button title="Ocupar agora" onPress={handleOcuparAgora} />
+              <View style={{ height: 10 }} />
+              <Button title="Deixar para depois" onPress={fecharModalSemOcupar} />
+            </View>
+          </ScrollView>
         </View>
       </Modal>
     </ScrollView>
@@ -454,7 +482,8 @@ export default function EntradaScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    padding: 16
+    padding: 16,
+    paddingBottom: 40
   },
   titulo: {
     fontSize: 24,
@@ -537,6 +566,10 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center"
+  },
+  modalScroll: {
+    flexGrow: 1,
     justifyContent: "center",
     padding: 16
   },

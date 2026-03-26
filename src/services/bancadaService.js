@@ -1,4 +1,4 @@
-import { get, ref, remove, update } from "firebase/database";
+import { ref, set, get, update, remove } from "firebase/database";
 import { db } from "../config/firebaseConfig";
 import { gerarId } from "../utils/idGenerator";
 
@@ -49,8 +49,63 @@ async function buscarSetorObrigatorio(setorId) {
   return setor;
 }
 
-function gerarCodigoBancada(setorCodigo, contador) {
-  return `${(setorCodigo || "").trim().toUpperCase()}${contador}`;
+function gerarCodigoBancada(setorCodigo, numero) {
+  return `${(setorCodigo || "").trim().toUpperCase()}${numero}`;
+}
+
+function extrairNumeroCodigo(codigo, setorCodigo) {
+  const prefixo = (setorCodigo || "").trim().toUpperCase();
+  const codigoNormalizado = (codigo || "").trim().toUpperCase();
+
+  if (!codigoNormalizado.startsWith(prefixo)) return null;
+
+  const parteNumero = codigoNormalizado.slice(prefixo.length);
+  const numero = Number(parteNumero);
+
+  return Number.isInteger(numero) && numero > 0 ? numero : null;
+}
+
+function encontrarMenorNumeroLivre(numerosUsados) {
+  let numero = 1;
+  const usados = new Set(numerosUsados);
+
+  while (usados.has(numero)) {
+    numero++;
+  }
+
+  return numero;
+}
+
+async function obterProximoNumeroBancada(setor) {
+  const bancadasSnapshot = await get(ref(db, "bancadas"));
+  const bancadas = bancadasSnapshot.exists()
+    ? Object.values(bancadasSnapshot.val())
+    : [];
+
+  const numerosUsados = bancadas
+    .filter((item) => item.setor_id === setor.id)
+    .map((item) => extrairNumeroCodigo(item.codigo, setor.codigo))
+    .filter((item) => item !== null);
+
+  return encontrarMenorNumeroLivre(numerosUsados);
+}
+
+async function recalcularContadorSetor(setor) {
+  const bancadasSnapshot = await get(ref(db, "bancadas"));
+  const bancadas = bancadasSnapshot.exists()
+    ? Object.values(bancadasSnapshot.val())
+    : [];
+
+  const numerosUsados = bancadas
+    .filter((item) => item.setor_id === setor.id)
+    .map((item) => extrairNumeroCodigo(item.codigo, setor.codigo))
+    .filter((item) => item !== null);
+
+  const maior = numerosUsados.length ? Math.max(...numerosUsados) : 0;
+
+  await update(ref(db, `setores/${setor.id}`), {
+    contador_bancadas: maior
+  });
 }
 
 export async function criarBancada({
@@ -70,8 +125,8 @@ export async function criarBancada({
     throw new Error("Capacidade total deve ser maior que zero.");
   }
 
-  const novoContador = Number(setor.contador_bancadas || 0) + 1;
-  const codigo = gerarCodigoBancada(setor.codigo, novoContador);
+  const proximoNumero = await obterProximoNumeroBancada(setor);
+  const codigo = gerarCodigoBancada(setor.codigo, proximoNumero);
   const id = gerarId("ban");
 
   const novaBancada = {
@@ -87,11 +142,8 @@ export async function criarBancada({
     active: true
   };
 
-  const updates = {};
-  updates[`bancadas/${id}`] = novaBancada;
-  updates[`setores/${setor.id}/contador_bancadas`] = novoContador;
-
-  await update(ref(db), updates);
+  await set(ref(db, `bancadas/${id}`), novaBancada);
+  await recalcularContadorSetor(setor);
 
   return novaBancada;
 }
@@ -124,13 +176,29 @@ export async function criarMultiplasBancadas({
     throw new Error("O eixo de incremento deve ser 'x' ou 'y'.");
   }
 
-  const contadorInicial = Number(setor.contador_bancadas || 0);
+  const bancadasSnapshot = await get(ref(db, "bancadas"));
+  const bancadasExistentes = bancadasSnapshot.exists()
+    ? Object.values(bancadasSnapshot.val())
+    : [];
+
+  const numerosUsados = bancadasExistentes
+    .filter((item) => item.setor_id === setor.id)
+    .map((item) => extrairNumeroCodigo(item.codigo, setor.codigo))
+    .filter((item) => item !== null);
+
+  const usados = new Set(numerosUsados);
+
   const updates = {};
   const criadas = [];
 
+  let numeroAtual = 1;
+
   for (let i = 1; i <= qtd; i++) {
-    const contadorAtual = contadorInicial + i;
-    const codigo = gerarCodigoBancada(setor.codigo, contadorAtual);
+    while (usados.has(numeroAtual)) {
+      numeroAtual++;
+    }
+
+    const codigo = gerarCodigoBancada(setor.codigo, numeroAtual);
     const id = gerarId("ban");
 
     const x = (eixo_incremento || "").toLowerCase() === "x"
@@ -156,11 +224,12 @@ export async function criarMultiplasBancadas({
 
     updates[`bancadas/${id}`] = bancada;
     criadas.push(bancada);
+    usados.add(numeroAtual);
+    numeroAtual++;
   }
 
-  updates[`setores/${setor.id}/contador_bancadas`] = contadorInicial + qtd;
-
   await update(ref(db), updates);
+  await recalcularContadorSetor(setor);
 
   return criadas;
 }
@@ -171,7 +240,7 @@ export async function listarBancadas() {
   if (!snapshot.exists()) return [];
 
   return Object.values(snapshot.val()).sort((a, b) =>
-    (a.codigo || "").localeCompare(b.codigo || "")
+    (a.codigo || "").localeCompare(b.codigo || "", undefined, { numeric: true })
   );
 }
 
@@ -202,17 +271,19 @@ export async function atualizarBancada(id, dados) {
 }
 
 export async function excluirBancada(id) {
-  const [ocupacoesSnapshot, colheitasSnapshot] = await Promise.all([
+  const [ocupacoesSnapshot, bancadaSnapshot] = await Promise.all([
     get(ref(db, "ocupacoes_bancada")),
-    get(ref(db, "colheitas"))
+    get(ref(db, `bancadas/${id}`))
   ]);
+
+  if (!bancadaSnapshot.exists()) {
+    throw new Error("Bancada não encontrada.");
+  }
+
+  const bancada = bancadaSnapshot.val();
 
   const ocupacoes = ocupacoesSnapshot.exists()
     ? Object.values(ocupacoesSnapshot.val())
-    : [];
-
-  const colheitas = colheitasSnapshot.exists()
-    ? Object.values(colheitasSnapshot.val())
     : [];
 
   const ocupacoesDaBancada = ocupacoes.filter((item) => item.bancada_id === id);
@@ -227,15 +298,40 @@ export async function excluirBancada(id) {
     throw new Error("Não é possível excluir a bancada porque ela possui histórico de ocupações.");
   }
 
-  const ocupacaoIds = ocupacoesDaBancada.map((item) => item.id);
+  await remove(ref(db, `bancadas/${id}`));
 
-  const existeColheitaVinculada = colheitas.some((item) =>
-    ocupacaoIds.includes(item.ocupacao_bancada_id)
+  if (bancada.setor_id) {
+    const setorSnapshot = await get(ref(db, `setores/${bancada.setor_id}`));
+    if (setorSnapshot.exists()) {
+      await recalcularContadorSetor(setorSnapshot.val());
+    }
+  }
+}
+
+export async function inativarBancada(id) {
+  const ocupacoesSnapshot = await get(ref(db, "ocupacoes_bancada"));
+
+  const ocupacoes = ocupacoesSnapshot.exists()
+    ? Object.values(ocupacoesSnapshot.val())
+    : [];
+
+  const existeOcupacaoAtiva = ocupacoes.some(
+    (item) => item.bancada_id === id && item.status === "ativa"
   );
 
-  if (existeColheitaVinculada) {
-    throw new Error("Não é possível excluir a bancada porque ela possui colheitas vinculadas.");
+  if (existeOcupacaoAtiva) {
+    throw new Error("Não é possível inativar a bancada porque ela possui ocupação ativa.");
   }
 
-  await remove(ref(db, `bancadas/${id}`));
+  await update(ref(db, `bancadas/${id}`), {
+    active: false,
+    status: "inativa"
+  });
+}
+
+export async function reativarBancada(id) {
+  await update(ref(db, `bancadas/${id}`), {
+    active: true,
+    status: "vazia"
+  });
 }

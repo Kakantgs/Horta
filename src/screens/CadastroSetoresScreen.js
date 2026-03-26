@@ -1,19 +1,21 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
-  Button,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Switch,
+  View,
   Text,
   TextInput,
-  View
+  Button,
+  StyleSheet,
+  Modal,
+  Switch,
+  ScrollView
 } from "react-native";
 import {
-  atualizarSetor,
   criarSetor,
+  listarSetores,
+  atualizarSetor,
   excluirSetor,
-  listarSetores
+  inativarSetor,
+  reativarSetor
 } from "../services/setorService";
 
 export default function CadastroSetoresScreen({ onVoltar }) {
@@ -106,6 +108,26 @@ export default function CadastroSetoresScreen({ onVoltar }) {
     }
   }
 
+  async function handleInativar(id) {
+    try {
+      await inativarSetor(id);
+      alert("Setor inativado com sucesso!");
+      carregar();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+
+  async function handleReativar(id) {
+    try {
+      await reativarSetor(id);
+      alert("Setor reativado com sucesso!");
+      carregar();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+
   return (
     <ScrollView
       style={styles.scroll}
@@ -163,6 +185,17 @@ export default function CadastroSetoresScreen({ onVoltar }) {
             <View style={styles.botao}>
               <Button title="Editar" onPress={() => abrirEdicao(item)} />
             </View>
+
+            {item.ativo ? (
+              <View style={styles.botao}>
+                <Button title="Inativar" onPress={() => handleInativar(item.id)} />
+              </View>
+            ) : (
+              <View style={styles.botao}>
+                <Button title="Reativar" onPress={() => handleReativar(item.id)} />
+              </View>
+            )}
+
             <View style={styles.botao}>
               <Button title="Excluir" onPress={() => handleExcluir(item.id)} />
             </View>

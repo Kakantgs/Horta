@@ -92,21 +92,41 @@ export async function colherOcupacao({
     throw new Error("Lote de produção não encontrado.");
   }
 
-  const qtdColhida = Number(quantidade_colhida);
-  const qtdPerda = Number(quantidade_perda || 0);
-  const qtdTotal = qtdColhida + qtdPerda;
+  const tipo = (tipo_colheita || "").trim().toLowerCase();
   const quantidadeAtualOcupacao = Number(ocupacao.quantidade_alocada);
-
-  if (qtdColhida <= 0) {
-    throw new Error("A quantidade colhida deve ser maior que zero.");
-  }
+  const qtdPerda = Number(quantidade_perda || 0);
+  let qtdColhida = Number(quantidade_colhida || 0);
 
   if (qtdPerda < 0) {
     throw new Error("A quantidade de perda não pode ser negativa.");
   }
 
-  if (qtdTotal > quantidadeAtualOcupacao) {
-    throw new Error("Colheita + perda ultrapassa a quantidade alocada na ocupação.");
+  if (!["parcial", "total"].includes(tipo)) {
+    throw new Error("Tipo de colheita inválido.");
+  }
+
+  if (tipo === "total") {
+    qtdColhida = quantidadeAtualOcupacao - qtdPerda;
+  }
+
+  if (qtdColhida <= 0) {
+    throw new Error("A quantidade colhida deve ser maior que zero.");
+  }
+
+  const qtdTotalConsumida = qtdColhida + qtdPerda;
+
+  if (tipo === "total") {
+    if (qtdTotalConsumida !== quantidadeAtualOcupacao) {
+      throw new Error(
+        "Na colheita total, colhida + perda deve ser exatamente igual ao total da ocupação."
+      );
+    }
+  } else {
+    if (qtdTotalConsumida > quantidadeAtualOcupacao) {
+      throw new Error(
+        "Na colheita parcial, colhida + perda não pode ultrapassar a quantidade da ocupação."
+      );
+    }
   }
 
   const colheitaId = gerarId("col");
@@ -120,7 +140,7 @@ export async function colherOcupacao({
     data_colheita,
     quantidade_colhida: qtdColhida,
     quantidade_perda: qtdPerda,
-    tipo_colheita: (tipo_colheita || "").trim().toLowerCase()
+    tipo_colheita: tipo
   };
 
   const novoLoteComercial = {
@@ -134,18 +154,16 @@ export async function colherOcupacao({
     status: qtdColhida > 0 ? "disponivel" : "encerrado"
   };
 
-  const novaQuantidadeOcupacao = quantidadeAtualOcupacao - qtdTotal;
+  const novaQuantidadeOcupacao = quantidadeAtualOcupacao - qtdTotalConsumida;
 
   const updates = {};
   updates[`colheitas/${colheitaId}`] = novaColheita;
   updates[`lotes_comerciais/${loteComercialId}`] = novoLoteComercial;
 
-  if (
-    (tipo_colheita || "").trim().toLowerCase() === "total" ||
-    novaQuantidadeOcupacao === 0
-  ) {
+  if (tipo === "total" || novaQuantidadeOcupacao === 0) {
     updates[`ocupacoes_bancada/${ocupacao_bancada_id}/status`] = "encerrada";
     updates[`ocupacoes_bancada/${ocupacao_bancada_id}/data_fim`] = data_colheita;
+    updates[`ocupacoes_bancada/${ocupacao_bancada_id}/quantidade_alocada`] = 0;
   } else {
     updates[`ocupacoes_bancada/${ocupacao_bancada_id}/quantidade_alocada`] =
       novaQuantidadeOcupacao;
@@ -159,12 +177,9 @@ export async function colherOcupacao({
     ocupacao_destino_id: null,
     bancada_origem_id: ocupacao.bancada_id,
     bancada_destino_id: null,
-    quantidade_movimentada: qtdTotal,
+    quantidade_movimentada: qtdTotalConsumida,
     data_movimentacao: data_colheita,
-    tipo_movimentacao:
-      (tipo_colheita || "").trim().toLowerCase() === "total"
-        ? "colheita_total"
-        : "colheita_parcial"
+    tipo_movimentacao: tipo === "total" ? "colheita_total" : "colheita_parcial"
   });
 
   await recalcularStatusBancada(ocupacao.bancada_id);
@@ -172,7 +187,8 @@ export async function colherOcupacao({
 
   return {
     colheita: novaColheita,
-    lote_comercial: novoLoteComercial
+    lote_comercial: novoLoteComercial,
+    quantidade_restante_na_ocupacao: novaQuantidadeOcupacao
   };
 }
 
