@@ -7,18 +7,50 @@ export async function listarClientes() {
 
   if (!snapshot.exists()) return [];
 
-  return Object.values(snapshot.val()).sort((a, b) =>
-    (a.nome || "").localeCompare(b.nome || "")
-  );
+  return Object.values(snapshot.val())
+    .filter((item) => item.ativo !== false)
+    .sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
 }
 
 export async function listarLotesComerciaisDisponiveis() {
-  const snapshot = await get(ref(db, "lotes_comerciais"));
+  const [
+    lotesComerciaisSnapshot,
+    lotesProducaoSnapshot,
+    variedadesSnapshot
+  ] = await Promise.all([
+    get(ref(db, "lotes_comerciais")),
+    get(ref(db, "lotes_producao")),
+    get(ref(db, "variedades"))
+  ]);
 
-  if (!snapshot.exists()) return [];
+  if (!lotesComerciaisSnapshot.exists()) return [];
 
-  return Object.values(snapshot.val())
+  const lotesComerciais = Object.values(lotesComerciaisSnapshot.val());
+  const lotesProducao = lotesProducaoSnapshot.exists()
+    ? Object.values(lotesProducaoSnapshot.val())
+    : [];
+  const variedades = variedadesSnapshot.exists()
+    ? Object.values(variedadesSnapshot.val())
+    : [];
+
+  return lotesComerciais
     .filter((item) => Number(item.quantidade_disponivel) > 0)
+    .map((item) => {
+      const loteProducao = lotesProducao.find(
+        (lp) => lp.id === item.lote_producao_id
+      );
+
+      const variedade = loteProducao
+        ? variedades.find((v) => v.id === loteProducao.variedade_id)
+        : null;
+
+      return {
+        ...item,
+        codigo_lote_producao: loteProducao?.codigo_lote || "-",
+        variedade_nome:
+          variedade?.nome || loteProducao?.variedade_nome || "Sem variedade"
+      };
+    })
     .sort((a, b) => (b.data_formacao || "").localeCompare(a.data_formacao || ""));
 }
 

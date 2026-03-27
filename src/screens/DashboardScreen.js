@@ -23,9 +23,7 @@ import {
   colherOcupacao,
   listarColheitasPorOcupacao
 } from "../services/colheitaService";
-import {
-  calcularResumoCapacidade
-} from "../services/faixaBancadaService";
+import { calcularResumoCapacidade } from "../services/faixaBancadaService";
 import { calcularResumoLotes } from "../services/saldoLoteService";
 import {
   sugerirFaixaParaQuantidade,
@@ -71,7 +69,7 @@ export default function DashboardScreen() {
   const [dataTransplante, setDataTransplante] = useState("");
   const [posicaoInicialDestino, setPosicaoInicialDestino] = useState("");
   const [posicaoFinalDestino, setPosicaoFinalDestino] = useState("");
-  const [encerrarOrigem, setEncerrarOrigem] = useState(false);
+  const [cancelarOrigem, setCancelarOrigem] = useState(false);
 
   const [dataColheita, setDataColheita] = useState("");
   const [quantidadeColhida, setQuantidadeColhida] = useState("");
@@ -179,8 +177,21 @@ export default function DashboardScreen() {
     sugerirDestino();
   }, [bancadaDestinoId, quantidadeTransplantada, bancadas]);
 
+  useEffect(() => {
+    if (!ocupacaoSelecionada) return;
+
+    const totalOcupacao = Number(ocupacaoSelecionada.quantidade_alocada || 0);
+    const perda = Number(quantidadePerda || 0);
+
+    if (tipoColheita === "total") {
+      const colhida = totalOcupacao - perda;
+      setQuantidadeColhida(String(Math.max(0, colhida)));
+    }
+  }, [tipoColheita, quantidadePerda, ocupacaoSelecionada]);
+
   const bancadasFiltradas = useMemo(() => {
     return bancadas.filter((item) => {
+      if (item.active === false) return false;
       if (filtroSetor && item.setor_id !== filtroSetor) return false;
       if (filtroTipo && item.tipo !== filtroTipo) return false;
       if (filtroStatus && item.status !== filtroStatus) return false;
@@ -198,6 +209,7 @@ export default function DashboardScreen() {
     const termo = buscaBancadaDestino.trim().toLowerCase();
 
     return bancadas
+      .filter((item) => item.active !== false)
       .filter((item) => item.id !== bancadaSelecionada?.id)
       .filter((item) => item.tipo === "final")
       .filter((item) => {
@@ -211,7 +223,9 @@ export default function DashboardScreen() {
       .sort((a, b) => {
         if (a.status === "vazia" && b.status !== "vazia") return -1;
         if (a.status !== "vazia" && b.status === "vazia") return 1;
-        return (a.codigo || "").localeCompare(b.codigo || "");
+        return (a.codigo || "").localeCompare(b.codigo || "", undefined, {
+          numeric: true
+        });
       });
   }, [bancadas, bancadaSelecionada, buscaBancadaDestino]);
 
@@ -241,11 +255,7 @@ export default function DashboardScreen() {
       );
 
       setLotesAtivos(
-        lotes.filter(
-          (lote) =>
-            lote.status === "ativo" &&
-            Number(lote.saldo_disponivel_para_ocupar) > 0
-        )
+        lotes.filter((lote) => Number(lote.saldo_disponivel_para_ocupar) > 0)
       );
     } catch (error) {
       alert(error.message);
@@ -289,7 +299,7 @@ export default function DashboardScreen() {
       setDataTransplante("");
       setPosicaoInicialDestino("");
       setPosicaoFinalDestino("");
-      setEncerrarOrigem(false);
+      setCancelarOrigem(false);
 
       setDataColheita("");
       setQuantidadeColhida("");
@@ -427,7 +437,7 @@ export default function DashboardScreen() {
     }
   }
 
-  async function handleEncerrarOcupacao(ocupacaoId) {
+  async function handleCancelarOcupacao(ocupacaoId) {
     try {
       const hoje = new Date().toISOString().split("T")[0];
 
@@ -436,7 +446,7 @@ export default function DashboardScreen() {
         data_fim: hoje
       });
 
-      alert("Ocupação encerrada com sucesso!");
+      alert("Ocupação cancelada com sucesso!");
 
       await carregarTudo();
       await carregarDetalhesBancada(bancadaSelecionada);
@@ -471,7 +481,7 @@ export default function DashboardScreen() {
         data_transplante: dataTransplante.trim(),
         posicao_inicial_destino: posicaoInicialDestino,
         posicao_final_destino: posicaoFinalDestino,
-        encerrar_ocupacao_origem: encerrarOrigem
+        encerrar_ocupacao_origem: cancelarOrigem
       });
 
       alert("Transplante realizado com sucesso!");
@@ -482,7 +492,7 @@ export default function DashboardScreen() {
       setDataTransplante("");
       setPosicaoInicialDestino("");
       setPosicaoFinalDestino("");
-      setEncerrarOrigem(false);
+      setCancelarOrigem(false);
 
       await carregarTudo();
       await carregarDetalhesBancada(bancadaSelecionada);
@@ -755,8 +765,8 @@ export default function DashboardScreen() {
 
                         <View style={{ marginTop: 8 }}>
                           <Button
-                            title="Encerrar ocupação"
-                            onPress={() => handleEncerrarOcupacao(item.id)}
+                            title="Cancelar ocupação (correção)"
+                            onPress={() => handleCancelarOcupacao(item.id)}
                           />
                         </View>
                       </View>
@@ -938,8 +948,8 @@ export default function DashboardScreen() {
                   />
 
                   <View style={styles.linhaSwitch}>
-                    <Text>Encerrar ocupação origem</Text>
-                    <Switch value={encerrarOrigem} onValueChange={setEncerrarOrigem} />
+                    <Text>Cancelar ocupação origem (correção)</Text>
+                    <Switch value={cancelarOrigem} onValueChange={setCancelarOrigem} />
                   </View>
 
                   <Button title="Realizar transplante" onPress={handleTransplante} />
@@ -963,6 +973,7 @@ export default function DashboardScreen() {
                     value={quantidadeColhida}
                     onChangeText={setQuantidadeColhida}
                     keyboardType="numeric"
+                    editable={tipoColheita !== "total"}
                   />
 
                   <Text style={styles.label}>Quantidade perda</Text>
@@ -979,6 +990,20 @@ export default function DashboardScreen() {
                     onChange={setTipoColheita}
                     options={OPCOES_TIPO_COLHEITA}
                   />
+
+                  {tipoColheita === "total" && ocupacaoSelecionada ? (
+                    <View style={styles.cardSugestao}>
+                      <Text style={styles.cardTitulo}>Colheita total selecionada</Text>
+                      <Text>Total na ocupação: {ocupacaoSelecionada.quantidade_alocada}</Text>
+                      <Text>Perda informada: {quantidadePerda || 0}</Text>
+                      <Text>
+                        Quantidade colhida calculada automaticamente: {quantidadeColhida || 0}
+                      </Text>
+                      <Text>
+                        Na colheita total, colhida + perda consomem toda a ocupação.
+                      </Text>
+                    </View>
+                  ) : null}
 
                   <Button title="Registrar colheita" onPress={handleColher} />
 
