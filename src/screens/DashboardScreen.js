@@ -7,8 +7,7 @@ import {
   TouchableOpacity,
   Modal,
   Button,
-  TextInput,
-  Switch
+  TextInput
 } from "react-native";
 import { get, ref } from "firebase/database";
 import { db } from "../config/firebaseConfig";
@@ -69,7 +68,6 @@ export default function DashboardScreen() {
   const [dataTransplante, setDataTransplante] = useState("");
   const [posicaoInicialDestino, setPosicaoInicialDestino] = useState("");
   const [posicaoFinalDestino, setPosicaoFinalDestino] = useState("");
-  const [cancelarOrigem, setCancelarOrigem] = useState(false);
 
   const [dataColheita, setDataColheita] = useState("");
   const [quantidadeColhida, setQuantidadeColhida] = useState("");
@@ -78,6 +76,7 @@ export default function DashboardScreen() {
 
   const [faixaSugeridaAtual, setFaixaSugeridaAtual] = useState(null);
   const [faixaSugeridaDestino, setFaixaSugeridaDestino] = useState(null);
+  const [resumoDestinoTransplante, setResumoDestinoTransplante] = useState(null);
 
   const OPCOES_TIPO_OCUPACAO_BERCARIO = [
     { label: "Berçário", value: "bercario" }
@@ -144,14 +143,16 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     async function sugerirDestino() {
-      if (!bancadaDestinoId || !quantidadeTransplantada) {
+      if (!bancadaDestinoId) {
         setFaixaSugeridaDestino(null);
+        setResumoDestinoTransplante(null);
         return;
       }
 
       const bancadaDestino = bancadas.find((item) => item.id === bancadaDestinoId);
       if (!bancadaDestino) {
         setFaixaSugeridaDestino(null);
+        setResumoDestinoTransplante(null);
         return;
       }
 
@@ -160,6 +161,13 @@ export default function DashboardScreen() {
         bancadaDestino.capacidade_total,
         ocupacoesDestino
       );
+
+      setResumoDestinoTransplante(resumoDestino);
+
+      if (!quantidadeTransplantada) {
+        setFaixaSugeridaDestino(null);
+        return;
+      }
 
       const sugestao = sugerirFaixaParaQuantidade(
         resumoDestino.faixasLivres,
@@ -299,7 +307,8 @@ export default function DashboardScreen() {
       setDataTransplante("");
       setPosicaoInicialDestino("");
       setPosicaoFinalDestino("");
-      setCancelarOrigem(false);
+      setFaixaSugeridaDestino(null);
+      setResumoDestinoTransplante(null);
 
       setDataColheita("");
       setQuantidadeColhida("");
@@ -407,6 +416,14 @@ export default function DashboardScreen() {
         return;
       }
 
+      const qtd = Number(quantidadeAlocada);
+      const faixa = Number(posicaoFinal) - Number(posicaoInicial) + 1;
+
+      if (qtd !== faixa) {
+        alert("A quantidade alocada deve ser igual ao tamanho da faixa.");
+        return;
+      }
+
       if (!validarDataISO(dataInicio.trim())) {
         alert("A data deve estar no formato YYYY-MM-DD e ser válida.");
         return;
@@ -469,6 +486,14 @@ export default function DashboardScreen() {
         return;
       }
 
+      const qtd = Number(quantidadeTransplantada);
+      const faixa = Number(posicaoFinalDestino) - Number(posicaoInicialDestino) + 1;
+
+      if (qtd !== faixa) {
+        alert("A quantidade transplantada deve ser igual ao tamanho da faixa destino.");
+        return;
+      }
+
       if (!validarDataISO(dataTransplante.trim())) {
         alert("A data do transplante deve estar no formato YYYY-MM-DD e ser válida.");
         return;
@@ -480,8 +505,7 @@ export default function DashboardScreen() {
         quantidade_transplantada: quantidadeTransplantada,
         data_transplante: dataTransplante.trim(),
         posicao_inicial_destino: posicaoInicialDestino,
-        posicao_final_destino: posicaoFinalDestino,
-        encerrar_ocupacao_origem: cancelarOrigem
+        posicao_final_destino: posicaoFinalDestino
       });
 
       alert("Transplante realizado com sucesso!");
@@ -492,7 +516,8 @@ export default function DashboardScreen() {
       setDataTransplante("");
       setPosicaoInicialDestino("");
       setPosicaoFinalDestino("");
-      setCancelarOrigem(false);
+      setFaixaSugeridaDestino(null);
+      setResumoDestinoTransplante(null);
 
       await carregarTudo();
       await carregarDetalhesBancada(bancadaSelecionada);
@@ -579,6 +604,47 @@ export default function DashboardScreen() {
 
     setPosicaoInicialDestino(String(faixaSugeridaDestino.inicio));
     setPosicaoFinalDestino(String(faixaSugeridaDestino.fim));
+  }
+
+  function preencherProximaFaixaLivreDestino() {
+    if (!ocupacaoSelecionada || !resumoDestinoTransplante) {
+      alert("Selecione uma bancada destino válida.");
+      return;
+    }
+
+    const faixasLivres = resumoDestinoTransplante.faixasLivres || [];
+    if (!faixasLivres.length) {
+      alert("A bancada final não possui faixa livre.");
+      return;
+    }
+
+    const faixa = faixasLivres[0];
+    const qtdOrigem = Number(ocupacaoSelecionada.quantidade_alocada || 0);
+    const qtd = Math.min(qtdOrigem, Number(faixa.tamanho));
+
+    setQuantidadeTransplantada(String(qtd));
+    setPosicaoInicialDestino(String(faixa.inicio));
+    setPosicaoFinalDestino(String(faixa.inicio + qtd - 1));
+  }
+
+  function preencherMaiorFaixaLivreDestino() {
+    if (!ocupacaoSelecionada || !resumoDestinoTransplante) {
+      alert("Selecione uma bancada destino válida.");
+      return;
+    }
+
+    const maior = obterMaiorFaixaLivre(resumoDestinoTransplante.faixasLivres || []);
+    if (!maior) {
+      alert("A bancada final não possui faixa livre.");
+      return;
+    }
+
+    const qtdOrigem = Number(ocupacaoSelecionada.quantidade_alocada || 0);
+    const qtd = Math.min(qtdOrigem, Number(maior.tamanho));
+
+    setQuantidadeTransplantada(String(qtd));
+    setPosicaoInicialDestino(String(maior.inicio));
+    setPosicaoFinalDestino(String(maior.inicio + qtd - 1));
   }
 
   function renderizarGrade() {
@@ -872,6 +938,14 @@ export default function DashboardScreen() {
                 <>
                   <Text style={styles.subsecao}>Transplante para final</Text>
 
+                  <View style={styles.cardSugestao}>
+                    <Text style={styles.cardTitulo}>Origem do transplante</Text>
+                    <Text>Quantidade atual na origem: {ocupacaoSelecionada.quantidade_alocada}</Text>
+                    <Text>
+                      Faixa atual: {ocupacaoSelecionada.posicao_inicial} até {ocupacaoSelecionada.posicao_final}
+                    </Text>
+                  </View>
+
                   <Text style={styles.label}>Buscar bancada destino</Text>
                   <TextInput
                     style={styles.input}
@@ -892,6 +966,28 @@ export default function DashboardScreen() {
                     }
                   />
 
+                  {resumoDestinoTransplante && (
+                    <View style={styles.cardSugestao}>
+                      <Text style={styles.cardTitulo}>Resumo da bancada final</Text>
+                      <Text>Ocupado: {resumoDestinoTransplante.totalOcupado}</Text>
+                      <Text>Livre: {resumoDestinoTransplante.totalLivre}</Text>
+                    </View>
+                  )}
+
+                  <View style={{ marginBottom: 8 }}>
+                    <Button
+                      title="Preencher próxima faixa livre"
+                      onPress={preencherProximaFaixaLivreDestino}
+                    />
+                  </View>
+
+                  <View style={{ marginBottom: 8 }}>
+                    <Button
+                      title="Preencher maior faixa livre"
+                      onPress={preencherMaiorFaixaLivreDestino}
+                    />
+                  </View>
+
                   <Text style={styles.label}>Quantidade transplantada</Text>
                   <TextInput
                     style={styles.input}
@@ -899,6 +995,19 @@ export default function DashboardScreen() {
                     onChangeText={setQuantidadeTransplantada}
                     keyboardType="numeric"
                   />
+
+                  {ocupacaoSelecionada && quantidadeTransplantada ? (
+                    <View style={styles.cardSugestao}>
+                      <Text>
+                        Quantidade que permanecerá na origem:{" "}
+                        {Math.max(
+                          0,
+                          Number(ocupacaoSelecionada.quantidade_alocada || 0) -
+                            Number(quantidadeTransplantada || 0)
+                        )}
+                      </Text>
+                    </View>
+                  ) : null}
 
                   {faixaSugeridaDestino ? (
                     <View style={styles.cardSugestao}>
@@ -946,11 +1055,6 @@ export default function DashboardScreen() {
                     onChangeText={setPosicaoFinalDestino}
                     keyboardType="numeric"
                   />
-
-                  <View style={styles.linhaSwitch}>
-                    <Text>Cancelar ocupação origem (correção)</Text>
-                    <Switch value={cancelarOrigem} onValueChange={setCancelarOrigem} />
-                  </View>
 
                   <Button title="Realizar transplante" onPress={handleTransplante} />
                 </>
@@ -1128,12 +1232,6 @@ const styles = StyleSheet.create({
   cardTitulo: {
     fontWeight: "bold",
     marginBottom: 4
-  },
-  linhaSwitch: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginVertical: 10
   },
   badgeStatus: {
     alignSelf: "flex-start",

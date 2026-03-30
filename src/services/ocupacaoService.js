@@ -1,110 +1,30 @@
-import { get, ref, update } from "firebase/database";
+import { get, ref, set, update } from "firebase/database";
 import { db } from "../config/firebaseConfig";
 import { gerarId } from "../utils/idGenerator";
-import { obterSaldoDisponivelLote } from "./loteFields";
 import { registrarMovimentacaoLote } from "./movimentacaoService";
 
-const TIPOS_OCUPACAO_VALIDOS = [
-  "bercario",
-  "entrada_direta_final",
-  "transplante"
-];
+async function recalcularStatusBancada(bancadaId) {
+  const snapshot = await get(ref(db, "ocupacoes_bancada"));
 
-function validarTipoOcupacao(tipo) {
-  const valor = (tipo || "").trim().toLowerCase();
+  const ocupacoes = snapshot.exists() ? Object.values(snapshot.val()) : [];
 
-  if (!TIPOS_OCUPACAO_VALIDOS.includes(valor)) {
-    throw new Error(
-      "Tipo de ocupação inválido. Use 'bercario', 'entrada_direta_final' ou 'transplante'."
-    );
-  }
+  const ocupacoesAtivas = ocupacoes.filter(
+    (item) => item.bancada_id === bancadaId && item.status === "ativa"
+  );
 
-  return valor;
-}
-
-export async function listarLotesAtivos() {
-  const snapshot = await get(ref(db, "lotes_producao"));
-
-  if (!snapshot.exists()) return [];
-
-  return Object.values(snapshot.val()).filter((lote) => {
-    const saldo = obterSaldoDisponivelLote(lote);
-    return lote.status === "ativo" && saldo > 0;
+  await update(ref(db, `bancadas/${bancadaId}`), {
+    status: ocupacoesAtivas.length > 0 ? "ocupada" : "vazia"
   });
 }
 
-export async function listarOcupacoesAtivas() {
+export async function listarOcupacoesAtivasPorBancada(bancadaId) {
   const snapshot = await get(ref(db, "ocupacoes_bancada"));
 
   if (!snapshot.exists()) return [];
 
-  return Object.values(snapshot.val()).filter(
-    (ocupacao) => ocupacao.status === "ativa"
-  );
-}
-
-export async function listarOcupacoesAtivasPorBancada(bancadaId) {
-  const ocupacoes = await listarOcupacoesAtivas();
-
-  return ocupacoes
-    .filter((ocupacao) => ocupacao.bancada_id === bancadaId)
+  return Object.values(snapshot.val())
+    .filter((item) => item.bancada_id === bancadaId && item.status === "ativa")
     .sort((a, b) => Number(a.posicao_inicial) - Number(b.posicao_inicial));
-}
-
-export async function listarOcupacoesAtivasPorLote(loteId) {
-  const ocupacoes = await listarOcupacoesAtivas();
-
-  return ocupacoes
-    .filter((ocupacao) => ocupacao.lote_producao_id === loteId)
-    .sort((a, b) => Number(a.posicao_inicial) - Number(b.posicao_inicial));
-}
-
-function existeConflitoDeFaixa(ocupacoesAtivas, posIni, posFim) {
-  return ocupacoesAtivas.some((ocupacao) => {
-    const iniExistente = Number(ocupacao.posicao_inicial);
-    const fimExistente = Number(ocupacao.posicao_final);
-
-    const semConflito = posFim < iniExistente || posIni > fimExistente;
-    return !semConflito;
-  });
-}
-
-async function carregarBancada(bancadaId) {
-  const snapshot = await get(ref(db, `bancadas/${bancadaId}`));
-
-  if (!snapshot.exists()) {
-    throw new Error("Bancada não encontrada.");
-  }
-
-  return snapshot.val();
-}
-
-async function carregarLote(loteId) {
-  const snapshot = await get(ref(db, `lotes_producao/${loteId}`));
-
-  if (!snapshot.exists()) {
-    throw new Error("Lote de produção não encontrado.");
-  }
-
-  return snapshot.val();
-}
-
-function validarCompatibilidadeTipoOcupacaoComBancada(tipoOcupacao, tipoBancada) {
-  const tipoOcp = (tipoOcupacao || "").toLowerCase();
-  const tipoBan = (tipoBancada || "").toLowerCase();
-
-  if (tipoOcp === "bercario" && tipoBan !== "bercario") {
-    throw new Error("O tipo de ocupação 'bercario' só pode ser usado em bancada do tipo 'bercario'.");
-  }
-
-  if (
-    (tipoOcp === "entrada_direta_final" || tipoOcp === "transplante") &&
-    tipoBan !== "final"
-  ) {
-    throw new Error(
-      "Os tipos 'entrada_direta_final' e 'transplante' só podem ser usados em bancada do tipo 'final'."
-    );
-  }
 }
 
 export async function registrarOcupacaoBancada({
@@ -114,45 +34,63 @@ export async function registrarOcupacaoBancada({
   posicao_final,
   quantidade_alocada,
   data_inicio,
-  tipo_ocupacao,
-  ocupacao_origem_id = null
+  tipo_ocupacao
 }) {
-  const lote = await carregarLote(lote_producao_id);
-  const bancada = await carregarBancada(bancada_id);
+  const [loteSnapshot, bancadaSnapshot, ocupacoesSnapshot] = await Promise.all([
+    get(ref(db, `lotes_producao/${lote_producao_id}`)),
+    get(ref(db, `bancadas/${bancada_id}`)),
+    get(ref(db, "ocupacoes_bancada"))
+  ]);
 
-  const quantidade = Number(quantidade_alocada);
+  if (!loteSnapshot.exists()) {
+    throw new Error("Lote de produção não encontrado.");
+  }
+
+  if (!bancadaSnapshot.exists()) {
+    throw new Error("Bancada não encontrada.");
+  }
+
+  const lote = loteSnapshot.val();
+  const bancada = bancadaSnapshot.val();
+  const ocupacoes = ocupacoesSnapshot.exists()
+    ? Object.values(ocupacoesSnapshot.val())
+    : [];
+
+  const qtd = Number(quantidade_alocada);
   const posIni = Number(posicao_inicial);
   const posFim = Number(posicao_final);
-  const tipoOcupacao = validarTipoOcupacao(tipo_ocupacao);
+  const saldoDisponivel = Number(
+    lote.saldo_disponivel_para_ocupar ?? lote.quantidade_atual ?? 0
+  );
 
-  validarCompatibilidadeTipoOcupacaoComBancada(tipoOcupacao, bancada.tipo);
-
-  if (quantidade <= 0) {
-    throw new Error("A quantidade alocada deve ser maior que zero.");
+  if (qtd <= 0) {
+    throw new Error("Quantidade alocada deve ser maior que zero.");
   }
 
-  if (posIni > posFim) {
-    throw new Error("A posição inicial não pode ser maior que a posição final.");
+  if (saldoDisponivel < qtd) {
+    throw new Error("O lote não possui saldo disponível suficiente para ocupar.");
   }
 
-  if (posIni < 1) {
-    throw new Error("A posição inicial deve ser maior ou igual a 1.");
+  if (posIni <= 0 || posFim <= 0 || posIni > posFim) {
+    throw new Error("Posições inválidas.");
   }
 
   if (posFim > Number(bancada.capacidade_total)) {
-    throw new Error("A posição final ultrapassa a capacidade total da bancada.");
+    throw new Error("A posição final ultrapassa a capacidade da bancada.");
   }
 
-  const saldoDisponivel = obterSaldoDisponivelLote(lote);
+  const ocupacoesAtivas = ocupacoes.filter(
+    (item) => item.bancada_id === bancada_id && item.status === "ativa"
+  );
 
-  if (quantidade > saldoDisponivel) {
-    throw new Error("A quantidade alocada é maior que o saldo disponível do lote.");
-  }
+  const conflito = ocupacoesAtivas.some((item) => {
+    const iniExistente = Number(item.posicao_inicial);
+    const fimExistente = Number(item.posicao_final);
+    return !(posFim < iniExistente || posIni > fimExistente);
+  });
 
-  const ocupacoesAtivasDaBancada = await listarOcupacoesAtivasPorBancada(bancada_id);
-
-  if (existeConflitoDeFaixa(ocupacoesAtivasDaBancada, posIni, posFim)) {
-    throw new Error("Essa faixa de posições já está ocupada por outro lote.");
+  if (conflito) {
+    throw new Error("A faixa informada conflita com uma ocupação já existente.");
   }
 
   const ocupacaoId = gerarId("ocp");
@@ -161,43 +99,24 @@ export async function registrarOcupacaoBancada({
     id: ocupacaoId,
     lote_producao_id,
     bancada_id,
-    ocupacao_origem_id,
+    ocupacao_origem_id: null,
     posicao_inicial: posIni,
     posicao_final: posFim,
-    quantidade_alocada: quantidade,
+    quantidade_alocada: qtd,
     data_inicio,
     data_fim: null,
-    tipo_ocupacao: tipoOcupacao,
+    tipo_ocupacao,
     status: "ativa"
   };
 
-  const novoSaldo = saldoDisponivel - quantidade;
+  const novoSaldo = saldoDisponivel - qtd;
 
   const updates = {};
   updates[`ocupacoes_bancada/${ocupacaoId}`] = novaOcupacao;
+  updates[`lotes_producao/${lote_producao_id}/saldo_disponivel_para_ocupar`] = novoSaldo;
   updates[`bancadas/${bancada_id}/status`] = "ocupada";
 
-  // CAMPO NOVO OFICIAL
-  updates[`lotes_producao/${lote_producao_id}/saldo_disponivel_para_ocupar`] = novoSaldo;
-
-  // CAMPO LEGADO TEMPORÁRIO
-  updates[`lotes_producao/${lote_producao_id}/quantidade_atual`] = novoSaldo;
-
   await update(ref(db), updates);
-
-  await registrarMovimentacaoLote({
-    lote_producao_id,
-    ocupacao_origem_id,
-    ocupacao_destino_id: ocupacaoId,
-    bancada_origem_id: null,
-    bancada_destino_id: bancada_id,
-    quantidade_movimentada: quantidade,
-    data_movimentacao: data_inicio,
-    tipo_movimentacao:
-      tipoOcupacao === "entrada_direta_final"
-        ? "entrada_direta_final"
-        : "ocupacao_inicial"
-  });
 
   return novaOcupacao;
 }
@@ -206,31 +125,24 @@ export async function encerrarOcupacaoBancada({
   ocupacao_id,
   data_fim
 }) {
-  const ocupacaoSnapshot = await get(ref(db, `ocupacoes_bancada/${ocupacao_id}`));
+  const snapshot = await get(ref(db, `ocupacoes_bancada/${ocupacao_id}`));
 
-  if (!ocupacaoSnapshot.exists()) {
+  if (!snapshot.exists()) {
     throw new Error("Ocupação não encontrada.");
   }
 
-  const ocupacao = ocupacaoSnapshot.val();
+  const ocupacao = snapshot.val();
 
   if (ocupacao.status !== "ativa") {
-    throw new Error("Essa ocupação já está encerrada.");
+    throw new Error("A ocupação já está encerrada.");
   }
 
-  const updates = {};
-  updates[`ocupacoes_bancada/${ocupacao_id}/status`] = "encerrada";
-  updates[`ocupacoes_bancada/${ocupacao_id}/data_fim`] = data_fim;
-
-  await update(ref(db), updates);
-
-  const ocupacoesRestantes = await listarOcupacoesAtivasPorBancada(ocupacao.bancada_id);
-
-  await update(ref(db, `bancadas/${ocupacao.bancada_id}`), {
-    status: ocupacoesRestantes.length > 0 ? "ocupada" : "vazia"
+  await update(ref(db), {
+    [`ocupacoes_bancada/${ocupacao_id}/status`]: "encerrada",
+    [`ocupacoes_bancada/${ocupacao_id}/data_fim`]: data_fim
   });
 
-  return true;
+  await recalcularStatusBancada(ocupacao.bancada_id);
 }
 
 export async function transplantarParaOutraBancada({
@@ -239,65 +151,92 @@ export async function transplantarParaOutraBancada({
   quantidade_transplantada,
   data_transplante,
   posicao_inicial_destino,
-  posicao_final_destino,
-  encerrar_ocupacao_origem = false
+  posicao_final_destino
 }) {
-  const ocupacaoOrigemSnapshot = await get(
-    ref(db, `ocupacoes_bancada/${ocupacao_origem_id}`)
-  );
+  const [
+    ocupacaoOrigemSnapshot,
+    bancadaDestinoSnapshot,
+    ocupacoesSnapshot
+  ] = await Promise.all([
+    get(ref(db, `ocupacoes_bancada/${ocupacao_origem_id}`)),
+    get(ref(db, `bancadas/${bancada_destino_id}`)),
+    get(ref(db, "ocupacoes_bancada"))
+  ]);
 
   if (!ocupacaoOrigemSnapshot.exists()) {
     throw new Error("Ocupação de origem não encontrada.");
   }
 
+  if (!bancadaDestinoSnapshot.exists()) {
+    throw new Error("Bancada de destino não encontrada.");
+  }
+
   const ocupacaoOrigem = ocupacaoOrigemSnapshot.val();
+  const bancadaDestino = bancadaDestinoSnapshot.val();
+  const todasOcupacoes = ocupacoesSnapshot.exists()
+    ? Object.values(ocupacoesSnapshot.val())
+    : [];
 
   if (ocupacaoOrigem.status !== "ativa") {
     throw new Error("A ocupação de origem precisa estar ativa.");
   }
 
-  const bancadaOrigem = await carregarBancada(ocupacaoOrigem.bancada_id);
-  const bancadaDestino = await carregarBancada(bancada_destino_id);
-
-  if ((bancadaOrigem.tipo || "").toLowerCase() !== "bercario") {
-    throw new Error("O transplante operacional só deve sair de bancadas do tipo 'bercario'.");
-  }
-
-  if ((bancadaDestino.tipo || "").toLowerCase() !== "final") {
-    throw new Error("O transplante operacional só deve ir para bancadas do tipo 'final'.");
-  }
-
-  const qtd = Number(quantidade_transplantada);
-
-  if (qtd <= 0) {
-    throw new Error("A quantidade transplantada deve ser maior que zero.");
-  }
-
-  if (qtd > Number(ocupacaoOrigem.quantidade_alocada)) {
-    throw new Error(
-      "A quantidade transplantada é maior que a quantidade alocada na ocupação de origem."
-    );
-  }
-
-  const ocupacoesAtivasDestino = await listarOcupacoesAtivasPorBancada(bancada_destino_id);
-
+  const qtdOrigem = Number(ocupacaoOrigem.quantidade_alocada);
+  const qtdTransplantada = Number(quantidade_transplantada);
   const posIniDestino = Number(posicao_inicial_destino);
   const posFimDestino = Number(posicao_final_destino);
 
-  if (existeConflitoDeFaixa(ocupacoesAtivasDestino, posIniDestino, posFimDestino)) {
-    throw new Error("A faixa de destino já está ocupada por outro lote.");
+  if (qtdTransplantada <= 0) {
+    throw new Error("A quantidade transplantada deve ser maior que zero.");
   }
 
-  const ocupacaoDestinoId = gerarId("ocp");
+  if (qtdTransplantada > qtdOrigem) {
+    throw new Error("A quantidade transplantada não pode ser maior que a quantidade da origem.");
+  }
+
+  if (posIniDestino <= 0 || posFimDestino <= 0 || posIniDestino > posFimDestino) {
+    throw new Error("Posições de destino inválidas.");
+  }
+
+  if (posFimDestino > Number(bancadaDestino.capacidade_total)) {
+    throw new Error("A posição final destino ultrapassa a capacidade da bancada.");
+  }
+
+  const tamanhoFaixaDestino = posFimDestino - posIniDestino + 1;
+
+  if (tamanhoFaixaDestino !== qtdTransplantada) {
+    throw new Error(
+      "A faixa destino deve ter exatamente o mesmo tamanho da quantidade transplantada."
+    );
+  }
+
+  const ocupacoesDestinoAtivas = todasOcupacoes.filter(
+    (item) => item.bancada_id === bancada_destino_id && item.status === "ativa"
+  );
+
+  const conflitoDestino = ocupacoesDestinoAtivas.some((item) => {
+    const iniExistente = Number(item.posicao_inicial);
+    const fimExistente = Number(item.posicao_final);
+    return !(posFimDestino < iniExistente || posIniDestino > fimExistente);
+  });
+
+  if (conflitoDestino) {
+    throw new Error("A faixa de destino conflita com ocupação já existente.");
+  }
+
+  const novaQtdOrigem = qtdOrigem - qtdTransplantada;
+  const zerouOrigem = novaQtdOrigem === 0;
+
+  const novaOcupacaoId = gerarId("ocp");
 
   const novaOcupacao = {
-    id: ocupacaoDestinoId,
+    id: novaOcupacaoId,
     lote_producao_id: ocupacaoOrigem.lote_producao_id,
     bancada_id: bancada_destino_id,
     ocupacao_origem_id: ocupacao_origem_id,
     posicao_inicial: posIniDestino,
     posicao_final: posFimDestino,
-    quantidade_alocada: qtd,
+    quantidade_alocada: qtdTransplantada,
     data_inicio: data_transplante,
     data_fim: null,
     tipo_ocupacao: "transplante",
@@ -305,12 +244,11 @@ export async function transplantarParaOutraBancada({
   };
 
   const updates = {};
-  updates[`ocupacoes_bancada/${ocupacaoDestinoId}`] = novaOcupacao;
+  updates[`ocupacoes_bancada/${novaOcupacaoId}`] = novaOcupacao;
   updates[`bancadas/${bancada_destino_id}/status`] = "ocupada";
 
-  const novaQtdOrigem = Number(ocupacaoOrigem.quantidade_alocada) - qtd;
-
-  if (encerrar_ocupacao_origem || novaQtdOrigem === 0) {
+  if (zerouOrigem) {
+    updates[`ocupacoes_bancada/${ocupacao_origem_id}/quantidade_alocada`] = 0;
     updates[`ocupacoes_bancada/${ocupacao_origem_id}/status`] = "encerrada";
     updates[`ocupacoes_bancada/${ocupacao_origem_id}/data_fim`] = data_transplante;
   } else {
@@ -322,25 +260,23 @@ export async function transplantarParaOutraBancada({
   await registrarMovimentacaoLote({
     lote_producao_id: ocupacaoOrigem.lote_producao_id,
     ocupacao_origem_id: ocupacao_origem_id,
-    ocupacao_destino_id: ocupacaoDestinoId,
+    ocupacao_destino_id: novaOcupacaoId,
     bancada_origem_id: ocupacaoOrigem.bancada_id,
-    bancada_destino_id,
-    quantidade_movimentada: qtd,
+    bancada_destino_id: bancada_destino_id,
+    quantidade_movimentada: qtdTransplantada,
     data_movimentacao: data_transplante,
     tipo_movimentacao: "transplante"
   });
 
-  if (encerrar_ocupacao_origem || novaQtdOrigem === 0) {
-    const ocupacoesRestantesOrigem = await listarOcupacoesAtivasPorBancada(
-      ocupacaoOrigem.bancada_id
-    );
-
-    await update(ref(db, `bancadas/${ocupacaoOrigem.bancada_id}`), {
-      status: ocupacoesRestantesOrigem.length > 0 ? "ocupada" : "vazia"
-    });
-  }
+  await recalcularStatusBancada(ocupacaoOrigem.bancada_id);
+  await recalcularStatusBancada(bancadaDestino.id);
 
   return {
-    nova_ocupacao: novaOcupacao
+    ocupacao_origem_atualizada: {
+      ...ocupacaoOrigem,
+      quantidade_alocada: novaQtdOrigem,
+      status: zerouOrigem ? "encerrada" : "ativa"
+    },
+    ocupacao_destino: novaOcupacao
   };
 }
