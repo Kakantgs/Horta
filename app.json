@@ -39,9 +39,7 @@
           }
         }
       ],
-      "expo-barcode-scanner",
-      "expo-sharing",
-      "@react-native-community/datetimepicker"
+      "expo-barcode-scanner"
     ],
     "experiments": {
       "typedRoutes": true,
