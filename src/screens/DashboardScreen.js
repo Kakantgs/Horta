@@ -583,18 +583,37 @@ export default function DashboardScreen() {
   }
 
   function usarFaixaInteiraRestante() {
-    if (!resumoCapacidade || !resumoCapacidade.faixasLivres.length) {
-      alert("Não existe faixa livre disponível.");
-      return;
-    }
-
-    const maior = obterMaiorFaixaLivre(resumoCapacidade.faixasLivres);
-    if (!maior) return;
-
-    setPosicaoInicial(String(maior.inicio));
-    setPosicaoFinal(String(maior.fim));
-    setQuantidadeAlocada(String(maior.tamanho));
+  if (!resumoCapacidade || !resumoCapacidade.faixasLivres.length) {
+    alert("Não existe faixa livre disponível.");
+    return;
   }
+
+  if (!loteSelecionadoId) {
+    alert("Selecione um lote primeiro.");
+    return;
+  }
+
+  const loteSelecionado = lotesAtivos.find((item) => item.id === loteSelecionadoId);
+  if (!loteSelecionado) {
+    alert("Lote selecionado não encontrado.");
+    return;
+  }
+
+  const maior = obterMaiorFaixaLivre(resumoCapacidade.faixasLivres);
+  if (!maior) return;
+
+  const saldoLote = Number(loteSelecionado.saldo_disponivel_para_ocupar || 0);
+  const qtd = Math.min(Number(maior.tamanho), saldoLote);
+
+  if (qtd <= 0) {
+    alert("Esse lote não possui saldo disponível para ocupar.");
+    return;
+  }
+
+  setPosicaoInicial(String(maior.inicio));
+  setPosicaoFinal(String(maior.inicio + qtd - 1));
+  setQuantidadeAlocada(String(qtd));
+}
 
   function usarFaixaSugeridaDestino() {
     if (!faixaSugeridaDestino) {
@@ -854,6 +873,41 @@ export default function DashboardScreen() {
                   `${item.variedade_nome} | Disponível: ${item.saldo_disponivel_para_ocupar}`
                 }
               />
+              <View style={{ marginBottom: 10 }}>
+  <Button
+    title="Preencher pelo saldo do lote"
+    onPress={() => {
+      if (!loteSelecionadoId) {
+        alert("Selecione um lote primeiro.");
+        return;
+      }
+
+      if (!resumoCapacidade || !resumoCapacidade.faixasLivres.length) {
+        alert("Não existe faixa livre disponível.");
+        return;
+      }
+
+      const loteSelecionado = lotesAtivos.find((item) => item.id === loteSelecionadoId);
+      if (!loteSelecionado) {
+        alert("Lote selecionado não encontrado.");
+        return;
+      }
+
+      const primeiraFaixa = resumoCapacidade.faixasLivres[0];
+      const saldoLote = Number(loteSelecionado.saldo_disponivel_para_ocupar || 0);
+      const qtd = Math.min(Number(primeiraFaixa.tamanho), saldoLote);
+
+      if (qtd <= 0) {
+        alert("Esse lote não possui saldo disponível para ocupar.");
+        return;
+      }
+
+      setQuantidadeAlocada(String(qtd));
+      setPosicaoInicial(String(primeiraFaixa.inicio));
+      setPosicaoFinal(String(primeiraFaixa.inicio + qtd - 1));
+    }}
+  />
+</View>
 
               <Text style={styles.label}>Quantidade alocada</Text>
               <TextInput

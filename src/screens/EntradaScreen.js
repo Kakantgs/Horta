@@ -18,7 +18,11 @@ import {
 } from "../services/entradaService";
 import { calcularResumoLotes } from "../services/saldoLoteService";
 import { listarBancadas } from "../services/bancadaService";
-import { registrarOcupacaoBancada } from "../services/ocupacaoService";
+import {
+  registrarOcupacaoBancada,
+  listarOcupacoesAtivasPorBancada
+} from "../services/ocupacaoService";
+import { calcularResumoCapacidade } from "../services/faixaBancadaService";
 import {
   calcularDiasDesdeEntrada,
   obterStatusVisualLote
@@ -33,6 +37,7 @@ export default function EntradaScreen() {
   const [entradas, setEntradas] = useState([]);
   const [lotes, setLotes] = useState([]);
   const [bancadas, setBancadas] = useState([]);
+  const [resumosBancadas, setResumosBancadas] = useState({});
 
   const [fornecedorId, setFornecedorId] = useState("");
   const [variedadeId, setVariedadeId] = useState("");
@@ -82,6 +87,8 @@ export default function EntradaScreen() {
         listarBancadas()
       ]);
 
+      const bancadasAtivas = listaBancadas.filter((item) => item.active !== false);
+
       setFornecedores(
         fornecedoresSnapshot.exists() ? Object.values(fornecedoresSnapshot.val()) : []
       );
@@ -94,10 +101,28 @@ export default function EntradaScreen() {
       setLotes(
         listaLotes.sort((a, b) => b.data_formacao.localeCompare(a.data_formacao))
       );
-      setBancadas(listaBancadas.filter((item) => item.active !== false));
+      setBancadas(bancadasAtivas);
+
+      await carregarResumosBancadas(bancadasAtivas);
     } catch (error) {
       alert(error.message);
     }
+  }
+
+  async function carregarResumosBancadas(listaBancadas) {
+    const resumoTemp = {};
+
+    for (const bancada of listaBancadas) {
+      const ocupacoes = await listarOcupacoesAtivasPorBancada(bancada.id);
+      const resumo = calcularResumoCapacidade(
+        bancada.capacidade_total,
+        ocupacoes
+      );
+
+      resumoTemp[bancada.id] = resumo;
+    }
+
+    setResumosBancadas(resumoTemp);
   }
 
   function fornecedorSelecionado() {
@@ -113,6 +138,11 @@ export default function EntradaScreen() {
     [bancadas, bancadaSelecionadaId]
   );
 
+  const resumoBancadaSelecionada = useMemo(() => {
+    if (!bancadaSelecionadaId) return null;
+    return resumosBancadas[bancadaSelecionadaId] || null;
+  }, [bancadaSelecionadaId, resumosBancadas]);
+
   function tipoOcupacaoDaBancada() {
     if (!bancadaSelecionada) return "";
     return bancadaSelecionada.tipo === "bercario" ? "bercario" : "entrada_direta_final";
@@ -125,16 +155,6 @@ export default function EntradaScreen() {
     setDataInicioOcupacao(dataEntrada || "");
   }, [novoLoteCriado, dataEntrada]);
 
-  useEffect(() => {
-    if (!bancadaSelecionada || !quantidadeAlocada) return;
-
-    const qtd = Number(quantidadeAlocada);
-    if (qtd > 0) {
-      setPosicaoInicial("1");
-      setPosicaoFinal(String(qtd));
-    }
-  }, [bancadaSelecionada, quantidadeAlocada]);
-
   function obterStatusVisualEntrada(lote) {
     const diasEntrada = calcularDiasDesdeEntrada(lote.data_formacao);
 
@@ -145,6 +165,32 @@ export default function EntradaScreen() {
       diasNaOcupacao: diasEntrada,
       temColheita: false
     });
+  }
+
+  function preencherComEspacoLivre() {
+    if (!novoLoteCriado) {
+      alert("Nenhum lote recém-criado encontrado.");
+      return;
+    }
+
+    if (!bancadaSelecionada || !resumoBancadaSelecionada) {
+      alert("Selecione uma bancada.");
+      return;
+    }
+
+    const faixasLivres = resumoBancadaSelecionada.faixasLivres || [];
+    if (!faixasLivres.length) {
+      alert("Essa bancada não possui espaço livre.");
+      return;
+    }
+
+    const primeiraFaixa = faixasLivres[0];
+    const qtdLote = Number(novoLoteCriado.quantidade_inicial || 0);
+    const qtd = Math.min(qtdLote, Number(primeiraFaixa.tamanho));
+
+    setQuantidadeAlocada(String(qtd));
+    setPosicaoInicial(String(primeiraFaixa.inicio));
+    setPosicaoFinal(String(primeiraFaixa.inicio + qtd - 1));
   }
 
   async function handleRegistrar() {
@@ -221,6 +267,14 @@ export default function EntradaScreen() {
         return;
       }
 
+      const qtd = Number(quantidadeAlocada);
+      const faixa = Number(posicaoFinal) - Number(posicaoInicial) + 1;
+
+      if (qtd !== faixa) {
+        alert("A quantidade alocada deve ser igual ao tamanho da faixa.");
+        return;
+      }
+
       if (!validarDataISO(dataInicioOcupacao.trim())) {
         alert("A data da ocupação deve estar no formato YYYY-MM-DD e ser válida.");
         return;
@@ -260,6 +314,22 @@ export default function EntradaScreen() {
     setPosicaoFinal("");
     setQuantidadeAlocada("");
     setDataInicioOcupacao("");
+  }
+
+  function montarSubtitleBancada(item) {
+    const resumo = resumosBancadas[item.id];
+
+    if (!resumo) {
+      return `${item.tipo} | Capacidade: ${item.capacidade_total} | Status: ${item.status}`;
+    }
+
+    const primeiraFaixa = resumo.faixasLivres?.[0];
+
+    return `${item.tipo} | Livre: ${resumo.totalLivre} | ${
+      primeiraFaixa
+        ? `Próx. faixa: ${primeiraFaixa.inicio}-${primeiraFaixa.fim}`
+        : "Sem faixa livre"
+    }`;
   }
 
   return (
@@ -424,10 +494,30 @@ export default function EntradaScreen() {
                 onSelect={setBancadaSelecionadaId}
                 emptyMessage="Nenhuma bancada cadastrada."
                 getTitle={(item) => item.codigo}
-                getSubtitle={(item) =>
-                  `${item.tipo} | Capacidade: ${item.capacidade_total} | Status: ${item.status}`
-                }
+                getSubtitle={(item) => montarSubtitleBancada(item)}
               />
+
+              {bancadaSelecionada && resumoBancadaSelecionada ? (
+                <View style={styles.cardResumo}>
+                  <Text style={styles.cardTitulo}>Resumo da bancada</Text>
+                  <Text>Capacidade: {bancadaSelecionada.capacidade_total}</Text>
+                  <Text>Ocupado: {resumoBancadaSelecionada.totalOcupado}</Text>
+                  <Text>Livre: {resumoBancadaSelecionada.totalLivre}</Text>
+                  <Text>
+                    Próx. faixa livre:{" "}
+                    {resumoBancadaSelecionada.faixasLivres?.[0]
+                      ? `${resumoBancadaSelecionada.faixasLivres[0].inicio}-${resumoBancadaSelecionada.faixasLivres[0].fim}`
+                      : "Nenhuma"}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={{ marginBottom: 10 }}>
+                <Button
+                  title="Preencher com espaço livre"
+                  onPress={preencherComEspacoLivre}
+                />
+              </View>
 
               {bancadaSelecionada ? (
                 <Text style={styles.selecionado}>
@@ -554,6 +644,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#7fb3d5",
     backgroundColor: "#eef7fc",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10
+  },
+  cardResumo: {
+    borderWidth: 1,
+    borderColor: "#58d68d",
+    backgroundColor: "#eefaf1",
     borderRadius: 8,
     padding: 12,
     marginBottom: 10
