@@ -3,15 +3,12 @@ import { db } from "../config/firebaseConfig";
 
 async function lerNo(caminho) {
   const snapshot = await get(ref(db, caminho));
-  return snapshot.exists() ? snapshot.val() : null;
-}
-
-function valores(obj) {
-  return obj ? Object.values(obj) : [];
+  if (!snapshot.exists()) return [];
+  return Object.values(snapshot.val());
 }
 
 export async function listarLotesParaAuditoria() {
-  const lotes = valores(await lerNo("lotes_producao"));
+  const lotes = await lerNo("lotes_producao");
 
   return lotes.sort((a, b) =>
     (b.data_formacao || "").localeCompare(a.data_formacao || "")
@@ -19,137 +16,146 @@ export async function listarLotesParaAuditoria() {
 }
 
 export async function buscarAuditoriaCompletaPorLote(loteId) {
-  const lote = await lerNo(`lotes_producao/${loteId}`);
-
-  if (!lote) {
-    throw new Error("Lote de produção não encontrado.");
-  }
-
   const [
-    entrada,
-    ocupacoesObj,
-    movimentacoesObj,
-    ocorrenciasObj,
-    colheitasObj,
-    lotesComerciaisObj,
-    pedidosObj,
-    itensPedidoObj,
-    bancadasObj,
-    setoresObj,
-    monitoramentosSetorObj,
-    ocorrenciasSetorObj
+    entradas,
+    lotesProducao,
+    ocupacoes,
+    movimentacoes,
+    monitoramentosSetor,
+    ocorrenciasSetor,
+    colheitas,
+    lotesComerciais,
+    pedidosVenda,
+    itensPedido,
+    clientes,
+    fornecedores,
+    variedades,
+    bancadas,
+    setores
   ] = await Promise.all([
-    lote.entrada_id ? lerNo(`entradas/${lote.entrada_id}`) : null,
+    lerNo("entradas"),
+    lerNo("lotes_producao"),
     lerNo("ocupacoes_bancada"),
     lerNo("movimentacoes_lote"),
-    lerNo("ocorrencias"),
+    lerNo("monitoramentos_setor"),
+    lerNo("ocorrencias_setor"),
     lerNo("colheitas"),
     lerNo("lotes_comerciais"),
     lerNo("pedidos_venda"),
     lerNo("itens_pedido_venda"),
+    lerNo("clientes"),
+    lerNo("fornecedores"),
+    lerNo("variedades"),
     lerNo("bancadas"),
-    lerNo("setores"),
-    lerNo("monitoramentos_setor"),
-    lerNo("ocorrencias_setor")
+    lerNo("setores")
   ]);
 
-  let fornecedorFinal = null;
-  if (entrada?.fornecedor_id) {
-    fornecedorFinal = await lerNo(`fornecedores/${entrada.fornecedor_id}`);
+  const lote = lotesProducao.find((item) => item.id === loteId);
+
+  if (!lote) {
+    throw new Error("Lote não encontrado.");
   }
 
-  const bancadas = valores(bancadasObj);
-  const setores = valores(setoresObj);
+  const entrada = entradas.find((ent) => ent.id === lote.entrada_id) || null;
+  const fornecedor =
+    entrada ? fornecedores.find((f) => f.id === entrada.fornecedor_id) || null : null;
+  const variedade =
+    variedades.find((v) => v.id === lote.variedade_id) || null;
 
-  const ocupacoes = valores(ocupacoesObj).filter(
-    (item) => item.lote_producao_id === loteId
+  const ocupacoesDoLote = ocupacoes
+    .filter((ocp) => ocp.lote_producao_id === lote.id)
+    .map((ocp) => {
+      const bancada = bancadas.find((b) => b.id === ocp.bancada_id) || null;
+      const setor = bancada
+        ? setores.find((s) => s.id === bancada.setor_id) || null
+        : null;
+
+      return {
+        ...ocp,
+        bancada,
+        setor
+      };
+    });
+
+  const setorIds = new Set(
+    ocupacoesDoLote.map((ocp) => ocp.setor?.id).filter(Boolean)
   );
 
-  const ocupacaoIds = ocupacoes.map((item) => item.id);
-  const bancadaIds = [...new Set(ocupacoes.map((item) => item.bancada_id))];
-
-  const bancadasRelacionadas = bancadas.filter((item) => bancadaIds.includes(item.id));
-  const setorIdsRelacionados = [
-    ...new Set(bancadasRelacionadas.map((item) => item.setor_id).filter(Boolean))
-  ];
-
-  const movimentacoes = valores(movimentacoesObj).filter(
-    (item) => item.lote_producao_id === loteId
+  const movimentacoesDoLote = movimentacoes.filter(
+    (mov) => mov.lote_producao_id === lote.id
   );
 
-  const ocorrencias = valores(ocorrenciasObj).filter((item) =>
-    ocupacaoIds.includes(item.ocupacao_bancada_id)
+  const monitoramentosRelacionados = monitoramentosSetor.filter((mon) =>
+    setorIds.has(mon.setor_id)
   );
 
-  const colheitas = valores(colheitasObj).filter(
-    (item) => item.lote_producao_id === loteId
+  const ocorrenciasRelacionadas = ocorrenciasSetor.filter((ocr) =>
+    setorIds.has(ocr.setor_id)
   );
 
-  const colheitaIds = colheitas.map((item) => item.id);
-
-  const lotesComerciais = valores(lotesComerciaisObj).filter((item) =>
-    colheitaIds.includes(item.colheita_id)
+  const colheitasRelacionadas = colheitas.filter(
+    (col) => col.lote_producao_id === lote.id
   );
 
-  const loteComercialIds = lotesComerciais.map((item) => item.id);
+  const colheitaIds = new Set(colheitasRelacionadas.map((col) => col.id));
 
-  const itensPedido = valores(itensPedidoObj).filter((item) =>
-    loteComercialIds.includes(item.lote_comercial_id)
+  const lotesComerciaisRelacionados = lotesComerciais.filter(
+    (lc) =>
+      lc.lote_producao_id === lote.id ||
+      colheitaIds.has(lc.colheita_id)
   );
 
-  const pedidoIds = [...new Set(itensPedido.map((item) => item.pedido_venda_id))];
-  const pedidos = valores(pedidosObj).filter((item) => pedidoIds.includes(item.id));
-
-  const monitoramentosSetor = valores(monitoramentosSetorObj).filter((item) =>
-    setorIdsRelacionados.includes(item.setor_id)
+  const loteComercialIds = new Set(
+    lotesComerciaisRelacionados.map((lc) => lc.id)
   );
 
-  const ocorrenciasSetor = valores(ocorrenciasSetorObj).filter((item) =>
-    setorIdsRelacionados.includes(item.setor_id)
+  const itensRelacionados = itensPedido.filter((item) =>
+    loteComercialIds.has(item.lote_comercial_id)
   );
 
-  const ocupacoesComBancada = ocupacoes.map((ocp) => ({
-    ...ocp,
-    bancada: bancadas.find((b) => b.id === ocp.bancada_id) || null
-  }));
+  const pedidoIds = new Set(itensRelacionados.map((item) => item.pedido_venda_id));
 
-  const pedidosComItens = pedidos.map((pedido) => ({
-    ...pedido,
-    itens: itensPedido.filter((item) => item.pedido_venda_id === pedido.id)
-  }));
+  const pedidosRelacionados = pedidosVenda
+    .filter((ped) => pedidoIds.has(ped.id))
+    .map((pedido) => {
+      const cliente = clientes.find((c) => c.id === pedido.cliente_id) || null;
+      const itens = itensRelacionados.filter(
+        (item) => item.pedido_venda_id === pedido.id
+      );
 
-  const setoresRelacionados = setores.filter((item) =>
-    setorIdsRelacionados.includes(item.id)
-  );
+      return {
+        ...pedido,
+        cliente,
+        itens
+      };
+    });
 
   return {
-    lote,
+    lote: {
+      ...lote,
+      variedade_nome: variedade?.nome || lote.variedade_nome || "-"
+    },
     entrada,
-    fornecedor: fornecedorFinal,
-    ocupacoes: ocupacoesComBancada.sort((a, b) =>
-      (a.data_inicio || "").localeCompare(b.data_inicio || "")
-    ),
-    movimentacoes: movimentacoes.sort((a, b) =>
+    fornecedor,
+    variedade,
+    ocupacoes: ocupacoesDoLote,
+    movimentacoes: movimentacoesDoLote.sort((a, b) =>
       (a.data_movimentacao || "").localeCompare(b.data_movimentacao || "")
     ),
-    ocorrencias: ocorrencias.sort((a, b) =>
-      (a.data_hora || "").localeCompare(b.data_hora || "")
+    monitoramentos: monitoramentosRelacionados.sort((a, b) =>
+      (a.data_hora_monitoramento || "").localeCompare(b.data_hora_monitoramento || "")
     ),
-    colheitas: colheitas.sort((a, b) =>
+    ocorrencias: ocorrenciasRelacionadas.sort((a, b) =>
+      (a.data_hora_ocorrencia || "").localeCompare(b.data_hora_ocorrencia || "")
+    ),
+    colheitas: colheitasRelacionadas.sort((a, b) =>
       (a.data_colheita || "").localeCompare(b.data_colheita || "")
     ),
-    lotes_comerciais: lotesComerciais.sort((a, b) =>
+    lotes_comerciais: lotesComerciaisRelacionados.sort((a, b) =>
       (a.data_formacao || "").localeCompare(b.data_formacao || "")
     ),
-    pedidos: pedidosComItens.sort((a, b) =>
+    pedidos: pedidosRelacionados.sort((a, b) =>
       (a.data_venda || "").localeCompare(b.data_venda || "")
-    ),
-    setores: setoresRelacionados,
-    monitoramentos_setor: monitoramentosSetor.sort((a, b) =>
-      (a.data_hora || "").localeCompare(b.data_hora || "")
-    ),
-    ocorrencias_setor: ocorrenciasSetor.sort((a, b) =>
-      (a.data_hora || "").localeCompare(b.data_hora || "")
     )
   };
 }

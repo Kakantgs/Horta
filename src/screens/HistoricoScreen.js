@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   ScrollView,
@@ -57,6 +57,11 @@ export default function HistoricoScreen() {
     }
   }
 
+  function limparSelecao() {
+    setLoteSelecionadoId("");
+    setAuditoria(null);
+  }
+
   async function handleGerarPdf() {
     try {
       if (!loteSelecionadoId) {
@@ -92,55 +97,116 @@ export default function HistoricoScreen() {
       setGerandoPdf(false);
     }
   }
+
   function obterStatusVisualAuditoriaOcupacao(item) {
-  const diasEntrada = calcularDiasDesdeEntrada(auditoria?.lote?.data_formacao);
-  const diasOcupacao = calcularDiasNaOcupacao(item.data_inicio, item.data_fim);
+    const diasEntrada = calcularDiasDesdeEntrada(auditoria?.lote?.data_formacao);
+    const diasOcupacao = calcularDiasNaOcupacao(item.data_inicio, item.data_fim);
 
-  const statusVisual = obterStatusVisualLote({
-    lote: auditoria?.lote,
-    bancadaTipo: item?.bancada?.tipo,
-    diasDesdeEntrada: diasEntrada,
-    diasNaOcupacao: diasOcupacao,
-    temColheita: (auditoria?.colheitas || []).length > 0
-  });
+    const statusVisual = obterStatusVisualLote({
+      lote: auditoria?.lote,
+      bancadaTipo: item?.bancada?.tipo,
+      diasDesdeEntrada: diasEntrada,
+      diasNaOcupacao: diasOcupacao,
+      temColheita: (auditoria?.colheitas || []).length > 0
+    });
 
-  return {
-    diasEntrada,
-    diasOcupacao,
-    statusVisual
-  };
-}
-
-function obterCorStatusVisual(statusVisual) {
-  switch ((statusVisual || "").toLowerCase()) {
-    case "recém-entrado":
-    case "recem-entrado":
-      return "#d6eaf8";
-    case "em berçário":
-    case "em bercario":
-      return "#fcf3cf";
-    case "pronto para final":
-      return "#fdebd0";
-    case "em final":
-      return "#d5f5e3";
-    case "pronto para colher":
-      return "#abebc6";
-    case "colhido":
-      return "#d7dbdd";
-    default:
-      return "#f4f6f7";
+    return {
+      diasEntrada,
+      diasOcupacao,
+      statusVisual
+    };
   }
-}
 
-  const lotesFiltrados = lotes.filter((item) => {
+  function obterCorStatusVisual(statusVisual) {
+    switch ((statusVisual || "").toLowerCase()) {
+      case "recém-entrado":
+      case "recem-entrado":
+        return "#d6eaf8";
+      case "em berçário":
+      case "em bercario":
+        return "#fcf3cf";
+      case "pronto para final":
+        return "#fdebd0";
+      case "em final":
+        return "#d5f5e3";
+      case "pronto para colher":
+        return "#abebc6";
+      case "colhido":
+        return "#d7dbdd";
+      default:
+        return "#f4f6f7";
+    }
+  }
+
+  const lotesFiltrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
-    if (!termo) return true;
+    if (!termo) return lotes;
 
-    return (
-      (item.codigo_lote || "").toLowerCase().includes(termo) ||
-      (item.variedade_nome || "").toLowerCase().includes(termo)
-    );
-  });
+    return lotes.filter((item) => {
+      return (
+        (item.codigo_lote || "").toLowerCase().includes(termo) ||
+        (item.variedade_nome || "").toLowerCase().includes(termo)
+      );
+    });
+  }, [lotes, busca]);
+
+  const timeline = useMemo(() => {
+    if (!auditoria) return [];
+
+    const eventos = [];
+
+    if (auditoria.entrada) {
+      eventos.push({
+        id: `entrada-${auditoria.entrada.id}`,
+        data: auditoria.entrada.data_entrada,
+        tipo: "entrada",
+        titulo: "Entrada do lote",
+        detalhe: `Fornecedor: ${auditoria.fornecedor?.nome || "-"}`
+      });
+    }
+
+    auditoria.ocupacoes.forEach((item) => {
+      eventos.push({
+        id: `ocupacao-${item.id}`,
+        data: item.data_inicio,
+        tipo: "ocupacao",
+        titulo: `Ocupação em ${item.bancada?.codigo || item.bancada_id}`,
+        detalhe: `Faixa ${item.posicao_inicial}-${item.posicao_final} | Quantidade ${item.quantidade_alocada}`
+      });
+    });
+
+    auditoria.movimentacoes.forEach((item) => {
+      eventos.push({
+        id: `mov-${item.id}`,
+        data: item.data_movimentacao,
+        tipo: "movimentacao",
+        titulo: `Movimentação: ${item.tipo_movimentacao}`,
+        detalhe: `Quantidade ${item.quantidade_movimentada}`
+      });
+    });
+
+    auditoria.colheitas.forEach((item) => {
+      eventos.push({
+        id: `colheita-${item.id}`,
+        data: item.data_colheita,
+        tipo: "colheita",
+        titulo: "Colheita",
+        detalhe: `Colhida ${item.quantidade_colhida} | Perda ${item.quantidade_perda}`
+      });
+    });
+
+    auditoria.pedidos.forEach((pedido) => {
+      eventos.push({
+        id: `pedido-${pedido.id}`,
+        data: pedido.data_venda,
+        tipo: "venda",
+        titulo: `Venda para ${pedido.cliente?.nome || pedido.cliente_nome || "-"}`,
+        detalhe: `Pedido ${pedido.id}`
+      });
+    });
+
+    return eventos.sort((a, b) => (a.data || "").localeCompare(b.data || ""));
+  }, [auditoria]);
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -177,6 +243,10 @@ function obterCorStatusVisual(statusVisual) {
         <>
           <View style={styles.linhaBotoes}>
             <View style={styles.botaoAcao}>
+              <Button title="Limpar seleção" onPress={limparSelecao} />
+            </View>
+
+            <View style={styles.botaoAcao}>
               <Button
                 title={gerandoPdf ? "Gerando PDF..." : "Gerar PDF"}
                 onPress={handleGerarPdf}
@@ -193,7 +263,7 @@ function obterCorStatusVisual(statusVisual) {
             </View>
           </View>
 
-          <Text style={styles.subtitulo}>Origem</Text>
+          <Text style={styles.subtitulo}>Resumo do lote</Text>
           <View style={styles.cardDestaque}>
             <Text style={styles.cardTitulo}>{auditoria.lote.codigo_lote}</Text>
             <Text>Variedade: {auditoria.lote.variedade_nome}</Text>
@@ -204,11 +274,26 @@ function obterCorStatusVisual(statusVisual) {
               {auditoria.lote.saldo_disponivel_para_ocupar ??
                 auditoria.lote.quantidade_atual}
             </Text>
+            <Text>Status: {auditoria.lote.status}</Text>
             <Text>Entrada: {auditoria.entrada?.id || "-"}</Text>
             <Text>Fornecedor: {auditoria.fornecedor?.nome || "-"}</Text>
             <Text>Data entrada: {auditoria.entrada?.data_entrada || "-"}</Text>
             <Text>Lote fornecedor: {auditoria.entrada?.lote_fornecedor || "-"}</Text>
           </View>
+
+          <Text style={styles.subtitulo}>Linha do tempo</Text>
+          {timeline.length === 0 ? (
+            <Text style={styles.aviso}>Nenhum evento encontrado.</Text>
+          ) : (
+            timeline.map((item) => (
+              <View key={item.id} style={styles.card}>
+                <Text style={styles.cardTitulo}>{item.titulo}</Text>
+                <Text>Data: {item.data || "-"}</Text>
+                <Text>Tipo: {item.tipo}</Text>
+                <Text>{item.detalhe}</Text>
+              </View>
+            ))
+          )}
 
           <Text style={styles.subtitulo}>Ocupações</Text>
           {auditoria.ocupacoes.length === 0 ? (
@@ -219,6 +304,7 @@ function obterCorStatusVisual(statusVisual) {
                 <Text style={styles.cardTitulo}>{item.id}</Text>
                 <Text>Bancada: {item.bancada?.codigo || item.bancada_id}</Text>
                 <Text>Tipo bancada: {item.bancada?.tipo || "-"}</Text>
+                <Text>Setor: {item.setor?.codigo || "-"}</Text>
                 <Text>
                   Faixa: {item.posicao_inicial} até {item.posicao_final}
                 </Text>
@@ -226,27 +312,27 @@ function obterCorStatusVisual(statusVisual) {
                 <Text>Data início: {item.data_inicio}</Text>
                 <Text>Data fim: {item.data_fim || "-"}</Text>
                 <Text>Tipo ocupação: {item.tipo_ocupacao}</Text>
-<Text>Status do banco: {item.status}</Text>
+                <Text>Status do banco: {item.status}</Text>
 
-{(() => {
-  const resumo = obterStatusVisualAuditoriaOcupacao(item);
+                {(() => {
+                  const resumo = obterStatusVisualAuditoriaOcupacao(item);
 
-  return (
-    <>
-      <Text>Dias na ocupação: {resumo.diasOcupacao}</Text>
-      <Text>Dias desde a entrada: {resumo.diasEntrada}</Text>
+                  return (
+                    <>
+                      <Text>Dias na ocupação: {resumo.diasOcupacao}</Text>
+                      <Text>Dias desde a entrada: {resumo.diasEntrada}</Text>
 
-      <View
-        style={[
-          styles.badgeStatus,
-          { backgroundColor: obterCorStatusVisual(resumo.statusVisual) }
-        ]}
-      >
-        <Text style={styles.badgeStatusTexto}>{resumo.statusVisual}</Text>
-      </View>
-    </>
-  );
-})()}
+                      <View
+                        style={[
+                          styles.badgeStatus,
+                          { backgroundColor: obterCorStatusVisual(resumo.statusVisual) }
+                        ]}
+                      >
+                        <Text style={styles.badgeStatusTexto}>{resumo.statusVisual}</Text>
+                      </View>
+                    </>
+                  );
+                })()}
               </View>
             ))
           )}
@@ -269,34 +355,36 @@ function obterCorStatusVisual(statusVisual) {
             ))
           )}
 
-          <Text style={styles.subtitulo}>Monitoramentos</Text>
+          <Text style={styles.subtitulo}>Monitoramentos por setor</Text>
           {auditoria.monitoramentos.length === 0 ? (
             <Text style={styles.aviso}>Nenhum monitoramento encontrado.</Text>
           ) : (
             auditoria.monitoramentos.map((item) => (
               <View key={item.id} style={styles.card}>
-                <Text style={styles.cardTitulo}>{item.data_hora}</Text>
-                <Text>Bancada: {item.bancada_id}</Text>
-                <Text>pH: {item.ph}</Text>
-                <Text>CE: {item.ce}</Text>
+                <Text style={styles.cardTitulo}>
+                  {item.data_hora_monitoramento || item.id}
+                </Text>
+                <Text>Setor: {item.setor_codigo || item.setor_id || "-"}</Text>
+                <Text>pH: {item.ph ?? "-"}</Text>
+                <Text>CE: {item.ce ?? "-"}</Text>
                 <Text>Temperatura: {item.temperatura_agua ?? "-"}</Text>
                 <Text>Obs.: {item.observacoes || "-"}</Text>
               </View>
             ))
           )}
 
-          <Text style={styles.subtitulo}>Ocorrências</Text>
+          <Text style={styles.subtitulo}>Ocorrências por setor</Text>
           {auditoria.ocorrencias.length === 0 ? (
             <Text style={styles.aviso}>Nenhuma ocorrência encontrada.</Text>
           ) : (
             auditoria.ocorrencias.map((item) => (
               <View key={item.id} style={styles.card}>
-                <Text style={styles.cardTitulo}>{item.tipo_ocorrencia}</Text>
-                <Text>Ocupação: {item.ocupacao_bancada_id}</Text>
-                <Text>Descrição: {item.descricao}</Text>
+                <Text style={styles.cardTitulo}>{item.tipo_ocorrencia || item.id}</Text>
+                <Text>Setor: {item.setor_codigo || item.setor_id || "-"}</Text>
+                <Text>Descrição: {item.descricao || "-"}</Text>
                 <Text>Ação corretiva: {item.acao_corretiva || "-"}</Text>
-                <Text>Data/hora: {item.data_hora}</Text>
-                <Text>Status: {item.status}</Text>
+                <Text>Data/hora: {item.data_hora_ocorrencia || "-"}</Text>
+                <Text>Status: {item.status || "-"}</Text>
               </View>
             ))
           )}
@@ -339,7 +427,7 @@ function obterCorStatusVisual(statusVisual) {
             auditoria.pedidos.map((pedido) => (
               <View key={pedido.id} style={styles.card}>
                 <Text style={styles.cardTitulo}>{pedido.id}</Text>
-                <Text>Cliente: {pedido.cliente_nome}</Text>
+                <Text>Cliente: {pedido.cliente?.nome || pedido.cliente_nome || "-"}</Text>
                 <Text>Data venda: {pedido.data_venda}</Text>
                 <Text>Status: {pedido.status}</Text>
 
@@ -362,7 +450,8 @@ function obterCorStatusVisual(statusVisual) {
 
 const styles = StyleSheet.create({
   container: {
-    padding: 16
+    padding: 16,
+    paddingBottom: 40
   },
   titulo: {
     fontSize: 24,
@@ -427,22 +516,24 @@ const styles = StyleSheet.create({
     marginBottom: 6
   },
   badgeStatus: {
-  alignSelf: "flex-start",
-  paddingHorizontal: 10,
-  paddingVertical: 6,
-  borderRadius: 20,
-  marginTop: 6,
-  marginBottom: 6
-},
-badgeStatusTexto: {
-  fontWeight: "bold",
-  fontSize: 12
-},
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginTop: 6,
+    marginBottom: 6
+  },
+  badgeStatusTexto: {
+    fontWeight: "bold",
+    fontSize: 12
+  },
   linhaBotoes: {
     flexDirection: "row",
+    flexWrap: "wrap",
     marginBottom: 12
   },
   botaoAcao: {
-    marginRight: 10
+    marginRight: 10,
+    marginBottom: 8
   }
 });
