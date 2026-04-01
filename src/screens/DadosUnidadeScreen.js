@@ -1,14 +1,27 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, TextInput, Button, StyleSheet } from "react-native";
 import {
-  salvarDadosUnidade,
-  buscarDadosUnidade
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  Button,
+  View
+} from "react-native";
+import {
+  obterDadosUnidade,
+  salvarDadosUnidade
 } from "../services/unitDataService";
 
 export default function DadosUnidadeScreen({ onVoltar }) {
-  const [name, setName] = useState("");
-  const [address, setAddress] = useState("");
+  const [nomeUnidade, setNomeUnidade] = useState("");
+  const [produtorNome, setProdutorNome] = useState("");
   const [cnpj, setCnpj] = useState("");
+  const [origemPadrao, setOrigemPadrao] = useState("");
+  const [localProducaoPadrao, setLocalProducaoPadrao] = useState("");
+  const [telefone, setTelefone] = useState("");
+  const [email, setEmail] = useState("");
+  const [site, setSite] = useState("");
+  const [salvando, setSalvando] = useState(false);
 
   useEffect(() => {
     carregar();
@@ -16,10 +29,16 @@ export default function DadosUnidadeScreen({ onVoltar }) {
 
   async function carregar() {
     try {
-      const dados = await buscarDadosUnidade();
-      setName(dados.name || "");
-      setAddress(dados.address || "");
+      const dados = await obterDadosUnidade();
+
+      setNomeUnidade(dados.nome_unidade || "");
+      setProdutorNome(dados.produtor_nome || "");
       setCnpj(dados.cnpj || "");
+      setOrigemPadrao(dados.origem_padrao || "");
+      setLocalProducaoPadrao(dados.local_producao_padrao || "");
+      setTelefone(dados.telefone || "");
+      setEmail(dados.email || "");
+      setSite(dados.site || "");
     } catch (error) {
       alert(error.message);
     }
@@ -27,55 +46,129 @@ export default function DadosUnidadeScreen({ onVoltar }) {
 
   async function handleSalvar() {
     try {
-      await salvarDadosUnidade({ name, address, cnpj });
+      setSalvando(true);
+
+      await salvarDadosUnidade({
+        nome_unidade: nomeUnidade,
+        produtor_nome: produtorNome,
+        cnpj,
+        origem_padrao: origemPadrao,
+        local_producao_padrao: localProducaoPadrao,
+        telefone,
+        email,
+        site
+      });
+
       alert("Dados da unidade salvos com sucesso!");
     } catch (error) {
       alert(error.message);
+    } finally {
+      setSalvando(false);
     }
   }
 
   return (
-    <View style={styles.container}>
-      <Button title="Voltar" onPress={onVoltar} />
+    <ScrollView contentContainerStyle={styles.container}>
+      {onVoltar ? <Button title="Voltar" onPress={onVoltar} /> : null}
 
       <Text style={styles.titulo}>Dados da Unidade</Text>
 
       <Text style={styles.label}>Nome da unidade</Text>
-      <TextInput style={styles.input} value={name} onChangeText={setName} />
+      <TextInput
+        style={styles.input}
+        value={nomeUnidade}
+        onChangeText={setNomeUnidade}
+        placeholder="Ex: Horta Smarsi"
+      />
 
-      <Text style={styles.label}>Endereço</Text>
-      <TextInput style={styles.input} value={address} onChangeText={setAddress} />
+      <Text style={styles.label}>Produtor</Text>
+      <TextInput
+        style={styles.input}
+        value={produtorNome}
+        onChangeText={setProdutorNome}
+        placeholder="Ex: Kauã Smarsi"
+      />
 
       <Text style={styles.label}>CNPJ</Text>
-      <TextInput style={styles.input} value={cnpj} onChangeText={setCnpj} />
+      <TextInput
+        style={styles.input}
+        value={cnpj}
+        onChangeText={setCnpj}
+        placeholder="00.000.000/0001-00"
+      />
 
-      <Button title="Salvar dados da unidade" onPress={handleSalvar} />
-    </View>
+      <Text style={styles.label}>Origem padrão</Text>
+      <TextInput
+        style={styles.input}
+        value={origemPadrao}
+        onChangeText={setOrigemPadrao}
+        placeholder="Ex: Estufa 1 - Setor A"
+      />
+
+      <Text style={styles.label}>Local da produção padrão</Text>
+      <TextInput
+        style={styles.input}
+        value={localProducaoPadrao}
+        onChangeText={setLocalProducaoPadrao}
+        placeholder="Ex: Estufa 1"
+      />
+
+      <Text style={styles.label}>Telefone</Text>
+      <TextInput
+        style={styles.input}
+        value={telefone}
+        onChangeText={setTelefone}
+        placeholder="Opcional"
+      />
+
+      <Text style={styles.label}>Email</Text>
+      <TextInput
+        style={styles.input}
+        value={email}
+        onChangeText={setEmail}
+        placeholder="Opcional"
+      />
+
+      <Text style={styles.label}>Site</Text>
+      <TextInput
+        style={styles.input}
+        value={site}
+        onChangeText={setSite}
+        placeholder="Opcional"
+      />
+
+      <View style={{ marginTop: 10 }}>
+        <Button
+          title={salvando ? "Salvando..." : "Salvar dados da unidade"}
+          onPress={handleSalvar}
+          disabled={salvando}
+        />
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     padding: 16,
-    justifyContent: "center"
+    paddingBottom: 40
   },
   titulo: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: "bold",
     textAlign: "center",
-    marginBottom: 20
+    marginBottom: 16
   },
   label: {
     fontWeight: "bold",
-    marginTop: 10,
-    marginBottom: 6
+    marginTop: 8,
+    marginBottom: 4
   },
   input: {
     borderWidth: 1,
     borderColor: "#999",
     borderRadius: 8,
     padding: 10,
-    marginBottom: 10
+    marginBottom: 8
   }
 });

@@ -15,6 +15,7 @@ import CadastroFornecedoresScreen from "./CadastroFornecedoresScreen";
 import CadastroClientesScreen from "./CadastroClientesScreen";
 import CadastroVariedadesScreen from "./CadastroVariedadesScreen";
 import DadosUnidadeScreen from "./DadosUnidadeScreen";
+import EtiquetasScreen from "./EtiquetasScreen";
 
 export default function AjustesScreen() {
   const [telaAtual, setTelaAtual] = useState("menu");
@@ -65,6 +66,10 @@ export default function AjustesScreen() {
     return <DadosUnidadeScreen onVoltar={() => setTelaAtual("menu")} />;
   }
 
+  if (telaAtual === "etiquetas") {
+    return <EtiquetasScreen onVoltar={() => setTelaAtual("menu")} />;
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.titulo}>Ajustes do Sistema</Text>
@@ -91,7 +96,7 @@ export default function AjustesScreen() {
       </View>
 
       <View style={styles.bloco}>
-        <Text style={styles.blocoTitulo}>Monitoramento Operacional</Text>
+        <Text style={styles.blocoTitulo}>Operação por Setor</Text>
 
         <View style={styles.botao}>
           <Button
@@ -139,13 +144,25 @@ export default function AjustesScreen() {
           />
         </View>
       </View>
+
+      <View style={styles.bloco}>
+        <Text style={styles.blocoTitulo}>Rastreabilidade</Text>
+
+        <View style={styles.botao}>
+          <Button
+            title="Etiquetas Térmicas"
+            onPress={() => setTelaAtual("etiquetas")}
+          />
+        </View>
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    padding: 16
+    padding: 16,
+    paddingBottom: 40
   },
   titulo: {
     fontSize: 24,
