@@ -1,5 +1,6 @@
 import { get, ref } from "firebase/database";
 import { db } from "../config/firebaseConfig";
+import { obterSaldoDisponivelLote } from "./loteFields";
 
 export async function calcularResumoLotes() {
   const [lotesSnapshot, ocupacoesSnapshot] = await Promise.all([
@@ -22,11 +23,13 @@ export async function calcularResumoLotes() {
       0
     );
 
+    const saldoDisponivel = obterSaldoDisponivelLote(lote);
+
     return {
       ...lote,
-      saldo_disponivel_para_ocupar: Number(lote.quantidade_atual || 0),
+      saldo_disponivel_para_ocupar: saldoDisponivel,
       total_alocado_em_bancadas: totalAlocado,
-      total_em_producao: Number(lote.quantidade_atual || 0) + totalAlocado
+      total_em_producao: saldoDisponivel + totalAlocado
     };
   });
 }

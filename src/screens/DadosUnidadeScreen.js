@@ -52,7 +52,7 @@ export default function DadosUnidadeScreen({ onVoltar }) {
         nome_unidade: nomeUnidade,
         produtor_nome: produtorNome,
         cnpj,
-        origem_padrao: origemPadrao,
+        
         local_producao_padrao: localProducaoPadrao,
         telefone,
         email,
@@ -97,13 +97,7 @@ export default function DadosUnidadeScreen({ onVoltar }) {
         placeholder="00.000.000/0001-00"
       />
 
-      <Text style={styles.label}>Origem padrão</Text>
-      <TextInput
-        style={styles.input}
-        value={origemPadrao}
-        onChangeText={setOrigemPadrao}
-        placeholder="Ex: Estufa 1 - Setor A"
-      />
+      
 
       <Text style={styles.label}>Local da produção padrão</Text>
       <TextInput

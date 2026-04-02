@@ -7,7 +7,8 @@ import {
   TouchableOpacity,
   Modal,
   Button,
-  TextInput
+  TextInput,
+  Alert
 } from "react-native";
 import { get, ref } from "firebase/database";
 import { db } from "../config/firebaseConfig";
@@ -112,6 +113,13 @@ export default function DashboardScreen() {
 
   const ocupacaoSelecionada =
     ocupacoesAtivasBancada.find((item) => item.id === ocupacaoSelecionadaId) || null;
+
+  const loteSelecionado =
+    lotesAtivos.find((item) => item.id === loteSelecionadoId) || null;
+
+  const saldoLoteSelecionado = Number(
+    loteSelecionado?.saldo_disponivel_para_ocupar || 0
+  );
 
   const resumoCapacidade = useMemo(() => {
     if (!bancadaSelecionada) return null;
@@ -263,10 +271,12 @@ export default function DashboardScreen() {
       );
 
       setLotesAtivos(
-        lotes.filter((lote) => Number(lote.saldo_disponivel_para_ocupar) > 0)
+        lotes
+          .filter((lote) => Number(lote.saldo_disponivel_para_ocupar) > 0)
+          .sort((a, b) => (a.codigo_lote || "").localeCompare(b.codigo_lote || ""))
       );
     } catch (error) {
-      alert(error.message);
+      Alert.alert("Erro", error.message);
     }
   }
 
@@ -318,7 +328,7 @@ export default function DashboardScreen() {
       await carregarDetalhesBancada(bancada);
       setModalVisible(true);
     } catch (error) {
-      alert(error.message);
+      Alert.alert("Erro", error.message);
     }
   }
 
@@ -333,7 +343,7 @@ export default function DashboardScreen() {
         const listaColheitas = await listarColheitasPorOcupacao(ocupacaoSelecionadaId);
         setColheitas(listaColheitas);
       } catch (error) {
-        alert(error.message);
+        Alert.alert("Erro", error.message);
       }
     }
 
@@ -412,20 +422,47 @@ export default function DashboardScreen() {
         !dataInicio ||
         !tipoOcupacao
       ) {
-        alert("Preencha os campos obrigatórios.");
+        Alert.alert("Campos obrigatórios", "Preencha os campos obrigatórios.");
         return;
       }
 
       const qtd = Number(quantidadeAlocada);
       const faixa = Number(posicaoFinal) - Number(posicaoInicial) + 1;
 
+      if (qtd <= 0) {
+        Alert.alert("Quantidade inválida", "A quantidade deve ser maior que zero.");
+        return;
+      }
+
+      if (saldoLoteSelecionado <= 0) {
+        Alert.alert(
+          "Sem saldo",
+          "O lote selecionado não possui saldo disponível para nova ocupação."
+        );
+        return;
+      }
+
+      if (qtd > saldoLoteSelecionado) {
+        Alert.alert(
+          "Saldo insuficiente",
+          `O lote possui saldo disponível de ${saldoLoteSelecionado} unidade(s).`
+        );
+        return;
+      }
+
       if (qtd !== faixa) {
-        alert("A quantidade alocada deve ser igual ao tamanho da faixa.");
+        Alert.alert(
+          "Faixa incompatível",
+          "A quantidade alocada deve ser igual ao tamanho da faixa."
+        );
         return;
       }
 
       if (!validarDataISO(dataInicio.trim())) {
-        alert("A data deve estar no formato YYYY-MM-DD e ser válida.");
+        Alert.alert(
+          "Data inválida",
+          "A data deve estar no formato YYYY-MM-DD e ser válida."
+        );
         return;
       }
 
@@ -439,7 +476,12 @@ export default function DashboardScreen() {
         tipo_ocupacao: tipoOcupacao
       });
 
-      alert("Ocupação registrada com sucesso!");
+      const saldoRestante = Math.max(0, saldoLoteSelecionado - qtd);
+
+      Alert.alert(
+        "Ocupação registrada",
+        `O lote foi alocado com sucesso.\n\nSaldo restante do lote: ${saldoRestante}`
+      );
 
       setLoteSelecionadoId("");
       setPosicaoInicial("");
@@ -450,26 +492,45 @@ export default function DashboardScreen() {
       await carregarTudo();
       await carregarDetalhesBancada(bancadaSelecionada);
     } catch (error) {
-      alert(error.message);
+      Alert.alert("Erro ao registrar ocupação", error.message);
     }
   }
 
-  async function handleCancelarOcupacao(ocupacaoId) {
-    try {
-      const hoje = new Date().toISOString().split("T")[0];
+  function handleCancelarOcupacao(ocupacaoId) {
+    const ocupacao = ocupacoesAtivasBancada.find((item) => item.id === ocupacaoId);
+    const quantidade = Number(ocupacao?.quantidade_alocada || 0);
 
-      await encerrarOcupacaoBancada({
-        ocupacao_id: ocupacaoId,
-        data_fim: hoje
-      });
+    Alert.alert(
+      "Cancelar ocupação",
+      `Essa ação é para correção operacional.\n\nA ocupação será encerrada e ${quantidade} unidade(s) voltarão para o saldo disponível do lote.\n\nDeseja continuar?`,
+      [
+        { text: "Não", style: "cancel" },
+        {
+          text: "Sim, cancelar",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const hoje = new Date().toISOString().split("T")[0];
 
-      alert("Ocupação cancelada com sucesso!");
+              await encerrarOcupacaoBancada({
+                ocupacao_id: ocupacaoId,
+                data_fim: hoje
+              });
 
-      await carregarTudo();
-      await carregarDetalhesBancada(bancadaSelecionada);
-    } catch (error) {
-      alert(error.message);
-    }
+              Alert.alert(
+                "Ocupação cancelada",
+                `A ocupação foi encerrada como correção e ${quantidade} unidade(s) retornaram ao saldo do lote.`
+              );
+
+              await carregarTudo();
+              await carregarDetalhesBancada(bancadaSelecionada);
+            } catch (error) {
+              Alert.alert("Erro ao cancelar ocupação", error.message);
+            }
+          }
+        }
+      ]
+    );
   }
 
   async function handleTransplante() {
@@ -482,20 +543,43 @@ export default function DashboardScreen() {
         !posicaoInicialDestino ||
         !posicaoFinalDestino
       ) {
-        alert("Preencha todos os campos do transplante.");
+        Alert.alert(
+          "Campos obrigatórios",
+          "Preencha todos os campos do transplante."
+        );
         return;
       }
 
       const qtd = Number(quantidadeTransplantada);
       const faixa = Number(posicaoFinalDestino) - Number(posicaoInicialDestino) + 1;
+      const qtdOrigem = Number(ocupacaoSelecionada.quantidade_alocada || 0);
+
+      if (qtd <= 0) {
+        Alert.alert("Quantidade inválida", "A quantidade transplantada deve ser maior que zero.");
+        return;
+      }
+
+      if (qtd > qtdOrigem) {
+        Alert.alert(
+          "Quantidade inválida",
+          `A ocupação de origem possui ${qtdOrigem} unidade(s).`
+        );
+        return;
+      }
 
       if (qtd !== faixa) {
-        alert("A quantidade transplantada deve ser igual ao tamanho da faixa destino.");
+        Alert.alert(
+          "Faixa incompatível",
+          "A quantidade transplantada deve ser igual ao tamanho da faixa destino."
+        );
         return;
       }
 
       if (!validarDataISO(dataTransplante.trim())) {
-        alert("A data do transplante deve estar no formato YYYY-MM-DD e ser válida.");
+        Alert.alert(
+          "Data inválida",
+          "A data do transplante deve estar no formato YYYY-MM-DD e ser válida."
+        );
         return;
       }
 
@@ -508,7 +592,12 @@ export default function DashboardScreen() {
         posicao_final_destino: posicaoFinalDestino
       });
 
-      alert("Transplante realizado com sucesso!");
+      const restanteOrigem = Math.max(0, qtdOrigem - qtd);
+
+      Alert.alert(
+        "Transplante realizado",
+        `O transplante foi concluído.\n\nPermanece na origem: ${restanteOrigem}\n\nObservação: o transplante move entre ocupações e não consome novo saldo disponível do lote.`
+      );
 
       setBancadaDestinoId("");
       setBuscaBancadaDestino("");
@@ -522,24 +611,30 @@ export default function DashboardScreen() {
       await carregarTudo();
       await carregarDetalhesBancada(bancadaSelecionada);
     } catch (error) {
-      alert(error.message);
+      Alert.alert("Erro ao transplantar", error.message);
     }
   }
 
   async function handleColher() {
     try {
       if (!ocupacaoSelecionada) {
-        alert("Selecione uma ocupação ativa para colher.");
+        Alert.alert("Seleção obrigatória", "Selecione uma ocupação ativa para colher.");
         return;
       }
 
       if (!dataColheita || !quantidadeColhida || !tipoColheita) {
-        alert("Preencha data, quantidade colhida e tipo de colheita.");
+        Alert.alert(
+          "Campos obrigatórios",
+          "Preencha data, quantidade colhida e tipo de colheita."
+        );
         return;
       }
 
       if (!validarDataISO(dataColheita.trim())) {
-        alert("A data da colheita deve estar no formato YYYY-MM-DD e ser válida.");
+        Alert.alert(
+          "Data inválida",
+          "A data da colheita deve estar no formato YYYY-MM-DD e ser válida."
+        );
         return;
       }
 
@@ -551,8 +646,9 @@ export default function DashboardScreen() {
         tipo_colheita: tipoColheita
       });
 
-      alert(
-        `Colheita registrada!\nLote comercial: ${resultado.lote_comercial.codigo_lote_comercial}`
+      Alert.alert(
+        "Colheita registrada",
+        `Lote comercial gerado: ${resultado.lote_comercial.codigo_lote_comercial}\n\nQuantidade restante na ocupação: ${resultado.quantidade_restante_na_ocupacao}`
       );
 
       setDataColheita("");
@@ -563,7 +659,7 @@ export default function DashboardScreen() {
       await carregarTudo();
       await carregarDetalhesBancada(bancadaSelecionada);
     } catch (error) {
-      alert(error.message);
+      Alert.alert("Erro ao registrar colheita", error.message);
     }
   }
 
@@ -574,7 +670,10 @@ export default function DashboardScreen() {
 
   function usarFaixaSugeridaAtual() {
     if (!faixaSugeridaAtual) {
-      alert("Não foi encontrada faixa livre suficiente para essa quantidade.");
+      Alert.alert(
+        "Sem faixa disponível",
+        "Não foi encontrada faixa livre suficiente para essa quantidade."
+      );
       return;
     }
 
@@ -583,41 +682,47 @@ export default function DashboardScreen() {
   }
 
   function usarFaixaInteiraRestante() {
-  if (!resumoCapacidade || !resumoCapacidade.faixasLivres.length) {
-    alert("Não existe faixa livre disponível.");
-    return;
+    if (!resumoCapacidade || !resumoCapacidade.faixasLivres.length) {
+      Alert.alert("Sem faixa livre", "Não existe faixa livre disponível.");
+      return;
+    }
+
+    if (!loteSelecionadoId) {
+      Alert.alert("Seleção obrigatória", "Selecione um lote primeiro.");
+      return;
+    }
+
+    const loteSelecionadoLocal = lotesAtivos.find((item) => item.id === loteSelecionadoId);
+    if (!loteSelecionadoLocal) {
+      Alert.alert("Lote não encontrado", "Lote selecionado não encontrado.");
+      return;
+    }
+
+    const maior = obterMaiorFaixaLivre(resumoCapacidade.faixasLivres);
+    if (!maior) return;
+
+    const saldoLote = Number(loteSelecionadoLocal.saldo_disponivel_para_ocupar || 0);
+    const qtd = Math.min(Number(maior.tamanho), saldoLote);
+
+    if (qtd <= 0) {
+      Alert.alert(
+        "Sem saldo",
+        "Esse lote não possui saldo disponível para ocupar."
+      );
+      return;
+    }
+
+    setPosicaoInicial(String(maior.inicio));
+    setPosicaoFinal(String(maior.inicio + qtd - 1));
+    setQuantidadeAlocada(String(qtd));
   }
-
-  if (!loteSelecionadoId) {
-    alert("Selecione um lote primeiro.");
-    return;
-  }
-
-  const loteSelecionado = lotesAtivos.find((item) => item.id === loteSelecionadoId);
-  if (!loteSelecionado) {
-    alert("Lote selecionado não encontrado.");
-    return;
-  }
-
-  const maior = obterMaiorFaixaLivre(resumoCapacidade.faixasLivres);
-  if (!maior) return;
-
-  const saldoLote = Number(loteSelecionado.saldo_disponivel_para_ocupar || 0);
-  const qtd = Math.min(Number(maior.tamanho), saldoLote);
-
-  if (qtd <= 0) {
-    alert("Esse lote não possui saldo disponível para ocupar.");
-    return;
-  }
-
-  setPosicaoInicial(String(maior.inicio));
-  setPosicaoFinal(String(maior.inicio + qtd - 1));
-  setQuantidadeAlocada(String(qtd));
-}
 
   function usarFaixaSugeridaDestino() {
     if (!faixaSugeridaDestino) {
-      alert("Não foi encontrada faixa livre suficiente na bancada destino.");
+      Alert.alert(
+        "Sem faixa disponível",
+        "Não foi encontrada faixa livre suficiente na bancada destino."
+      );
       return;
     }
 
@@ -627,13 +732,13 @@ export default function DashboardScreen() {
 
   function preencherProximaFaixaLivreDestino() {
     if (!ocupacaoSelecionada || !resumoDestinoTransplante) {
-      alert("Selecione uma bancada destino válida.");
+      Alert.alert("Seleção obrigatória", "Selecione uma bancada destino válida.");
       return;
     }
 
     const faixasLivres = resumoDestinoTransplante.faixasLivres || [];
     if (!faixasLivres.length) {
-      alert("A bancada final não possui faixa livre.");
+      Alert.alert("Sem faixa livre", "A bancada final não possui faixa livre.");
       return;
     }
 
@@ -648,13 +753,13 @@ export default function DashboardScreen() {
 
   function preencherMaiorFaixaLivreDestino() {
     if (!ocupacaoSelecionada || !resumoDestinoTransplante) {
-      alert("Selecione uma bancada destino válida.");
+      Alert.alert("Seleção obrigatória", "Selecione uma bancada destino válida.");
       return;
     }
 
     const maior = obterMaiorFaixaLivre(resumoDestinoTransplante.faixasLivres || []);
     if (!maior) {
-      alert("A bancada final não possui faixa livre.");
+      Alert.alert("Sem faixa livre", "A bancada final não possui faixa livre.");
       return;
     }
 
@@ -870,44 +975,80 @@ export default function DashboardScreen() {
                 emptyMessage="Nenhum lote ativo disponível."
                 getTitle={(item) => item.codigo_lote}
                 getSubtitle={(item) =>
-                  `${item.variedade_nome} | Disponível: ${item.saldo_disponivel_para_ocupar}`
+                  `${item.variedade_nome} | Saldo disponível: ${item.saldo_disponivel_para_ocupar}`
                 }
               />
+
+              {loteSelecionado ? (
+                <View
+                  style={[
+                    styles.cardSaldoLote,
+                    saldoLoteSelecionado > 0 ? styles.cardSaldoOk : styles.cardSaldoZero
+                  ]}
+                >
+                  <Text style={styles.cardTitulo}>Resumo do lote selecionado</Text>
+                  <Text>Código: {loteSelecionado.codigo_lote}</Text>
+                  <Text>Variedade: {loteSelecionado.variedade_nome}</Text>
+                  <Text>Saldo disponível para nova ocupação: {saldoLoteSelecionado}</Text>
+                  {saldoLoteSelecionado <= 0 ? (
+                    <Text style={styles.textoAlerta}>
+                      Esse lote não possui saldo disponível e não deve mais ser usado para nova ocupação.
+                    </Text>
+                  ) : (
+                    <Text style={styles.textoSuave}>
+                      A ocupação vai consumir diretamente esse saldo.
+                    </Text>
+                  )}
+                </View>
+              ) : (
+                <Text style={styles.aviso}>
+                  Selecione um lote para ver o saldo disponível antes de ocupar.
+                </Text>
+              )}
+
               <View style={{ marginBottom: 10 }}>
-  <Button
-    title="Preencher pelo saldo do lote"
-    onPress={() => {
-      if (!loteSelecionadoId) {
-        alert("Selecione um lote primeiro.");
-        return;
-      }
+                <Button
+                  title="Preencher pelo saldo do lote"
+                  onPress={() => {
+                    if (!loteSelecionadoId) {
+                      Alert.alert("Seleção obrigatória", "Selecione um lote primeiro.");
+                      return;
+                    }
 
-      if (!resumoCapacidade || !resumoCapacidade.faixasLivres.length) {
-        alert("Não existe faixa livre disponível.");
-        return;
-      }
+                    if (!resumoCapacidade || !resumoCapacidade.faixasLivres.length) {
+                      Alert.alert("Sem faixa livre", "Não existe faixa livre disponível.");
+                      return;
+                    }
 
-      const loteSelecionado = lotesAtivos.find((item) => item.id === loteSelecionadoId);
-      if (!loteSelecionado) {
-        alert("Lote selecionado não encontrado.");
-        return;
-      }
+                    const loteSelecionadoLocal = lotesAtivos.find(
+                      (item) => item.id === loteSelecionadoId
+                    );
 
-      const primeiraFaixa = resumoCapacidade.faixasLivres[0];
-      const saldoLote = Number(loteSelecionado.saldo_disponivel_para_ocupar || 0);
-      const qtd = Math.min(Number(primeiraFaixa.tamanho), saldoLote);
+                    if (!loteSelecionadoLocal) {
+                      Alert.alert("Lote não encontrado", "Lote selecionado não encontrado.");
+                      return;
+                    }
 
-      if (qtd <= 0) {
-        alert("Esse lote não possui saldo disponível para ocupar.");
-        return;
-      }
+                    const primeiraFaixa = resumoCapacidade.faixasLivres[0];
+                    const saldoLote = Number(
+                      loteSelecionadoLocal.saldo_disponivel_para_ocupar || 0
+                    );
+                    const qtd = Math.min(Number(primeiraFaixa.tamanho), saldoLote);
 
-      setQuantidadeAlocada(String(qtd));
-      setPosicaoInicial(String(primeiraFaixa.inicio));
-      setPosicaoFinal(String(primeiraFaixa.inicio + qtd - 1));
-    }}
-  />
-</View>
+                    if (qtd <= 0) {
+                      Alert.alert(
+                        "Sem saldo",
+                        "Esse lote não possui saldo disponível para ocupar."
+                      );
+                      return;
+                    }
+
+                    setQuantidadeAlocada(String(qtd));
+                    setPosicaoInicial(String(primeiraFaixa.inicio));
+                    setPosicaoFinal(String(primeiraFaixa.inicio + qtd - 1));
+                  }}
+                />
+              </View>
 
               <Text style={styles.label}>Quantidade alocada</Text>
               <TextInput
@@ -915,7 +1056,25 @@ export default function DashboardScreen() {
                 value={quantidadeAlocada}
                 onChangeText={setQuantidadeAlocada}
                 keyboardType="numeric"
+                placeholder="Informe a quantidade a ocupar"
               />
+
+              {loteSelecionado && quantidadeAlocada ? (
+                <View style={styles.cardSugestao}>
+                  <Text style={styles.cardTitulo}>Validação prévia do saldo</Text>
+                  <Text>Saldo do lote: {saldoLoteSelecionado}</Text>
+                  <Text>Quantidade informada: {Number(quantidadeAlocada || 0)}</Text>
+                  <Text>
+                    Saldo após ocupação:{" "}
+                    {Math.max(0, saldoLoteSelecionado - Number(quantidadeAlocada || 0))}
+                  </Text>
+                  {Number(quantidadeAlocada || 0) > saldoLoteSelecionado ? (
+                    <Text style={styles.textoErro}>
+                      A quantidade informada ultrapassa o saldo disponível do lote.
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
 
               {faixaSugeridaAtual ? (
                 <View style={styles.cardSugestao}>
@@ -997,6 +1156,9 @@ export default function DashboardScreen() {
                     <Text>Quantidade atual na origem: {ocupacaoSelecionada.quantidade_alocada}</Text>
                     <Text>
                       Faixa atual: {ocupacaoSelecionada.posicao_inicial} até {ocupacaoSelecionada.posicao_final}
+                    </Text>
+                    <Text style={styles.textoSuave}>
+                      O transplante move plantas da ocupação de origem para a bancada final. Ele não consome novo saldo do lote.
                     </Text>
                   </View>
 
@@ -1283,6 +1445,20 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 10
   },
+  cardSaldoLote: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10
+  },
+  cardSaldoOk: {
+    borderColor: "#58d68d",
+    backgroundColor: "#eefaf1"
+  },
+  cardSaldoZero: {
+    borderColor: "#e74c3c",
+    backgroundColor: "#fdecea"
+  },
   cardTitulo: {
     fontWeight: "bold",
     marginBottom: 4
@@ -1298,5 +1474,19 @@ const styles = StyleSheet.create({
   badgeStatusTexto: {
     fontWeight: "bold",
     fontSize: 12
+  },
+  textoAlerta: {
+    marginTop: 6,
+    color: "#c0392b",
+    fontWeight: "600"
+  },
+  textoErro: {
+    marginTop: 6,
+    color: "#c0392b",
+    fontWeight: "600"
+  },
+  textoSuave: {
+    marginTop: 6,
+    color: "#2c3e50"
   }
 });

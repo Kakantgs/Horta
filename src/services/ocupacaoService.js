@@ -1,7 +1,8 @@
-import { get, ref, set, update } from "firebase/database";
+import { get, ref, update } from "firebase/database";
 import { db } from "../config/firebaseConfig";
 import { gerarId } from "../utils/idGenerator";
 import { registrarMovimentacaoLote } from "./movimentacaoService";
+import { obterSaldoDisponivelLote } from "./loteFields";
 
 async function recalcularStatusBancada(bancadaId) {
   const snapshot = await get(ref(db, "ocupacoes_bancada"));
@@ -59,9 +60,7 @@ export async function registrarOcupacaoBancada({
   const qtd = Number(quantidade_alocada);
   const posIni = Number(posicao_inicial);
   const posFim = Number(posicao_final);
-  const saldoDisponivel = Number(
-    lote.saldo_disponivel_para_ocupar ?? lote.quantidade_atual ?? 0
-  );
+  const saldoDisponivel = obterSaldoDisponivelLote(lote);
 
   if (qtd <= 0) {
     throw new Error("Quantidade alocada deve ser maior que zero.");
@@ -125,24 +124,52 @@ export async function encerrarOcupacaoBancada({
   ocupacao_id,
   data_fim
 }) {
-  const snapshot = await get(ref(db, `ocupacoes_bancada/${ocupacao_id}`));
+  const ocupacaoSnapshot = await get(ref(db, `ocupacoes_bancada/${ocupacao_id}`));
 
-  if (!snapshot.exists()) {
+  if (!ocupacaoSnapshot.exists()) {
     throw new Error("Ocupação não encontrada.");
   }
 
-  const ocupacao = snapshot.val();
+  const ocupacao = ocupacaoSnapshot.val();
 
   if (ocupacao.status !== "ativa") {
     throw new Error("A ocupação já está encerrada.");
   }
 
-  await update(ref(db), {
-    [`ocupacoes_bancada/${ocupacao_id}/status`]: "encerrada",
-    [`ocupacoes_bancada/${ocupacao_id}/data_fim`]: data_fim
-  });
+  const loteSnapshot = await get(ref(db, `lotes_producao/${ocupacao.lote_producao_id}`));
+
+  if (!loteSnapshot.exists()) {
+    throw new Error("Lote da ocupação não encontrado.");
+  }
+
+  const lote = loteSnapshot.val();
+  const saldoAtual = obterSaldoDisponivelLote(lote);
+  const quantidadeDevolver = Number(ocupacao.quantidade_alocada || 0);
+  const novoSaldo = saldoAtual + quantidadeDevolver;
+
+  const updates = {};
+  updates[`ocupacoes_bancada/${ocupacao_id}/status`] = "encerrada";
+  updates[`ocupacoes_bancada/${ocupacao_id}/data_fim`] = data_fim;
+  updates[`ocupacoes_bancada/${ocupacao_id}/quantidade_alocada`] = 0;
+  updates[`lotes_producao/${ocupacao.lote_producao_id}/saldo_disponivel_para_ocupar`] = novoSaldo;
+
+  await update(ref(db), updates);
 
   await recalcularStatusBancada(ocupacao.bancada_id);
+
+  await registrarMovimentacaoLote({
+    lote_producao_id: ocupacao.lote_producao_id,
+    ocupacao_origem_id: ocupacao_id,
+    ocupacao_destino_id: null,
+    bancada_origem_id: ocupacao.bancada_id,
+    bancada_destino_id: null,
+    quantidade_movimentada: quantidadeDevolver,
+    data_movimentacao: data_fim,
+    tipo_movimentacao:
+      ocupacao.tipo_ocupacao === "entrada_direta_final"
+        ? "entrada_direta_final"
+        : "ocupacao_inicial"
+  });
 }
 
 export async function transplantarParaOutraBancada({

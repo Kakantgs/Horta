@@ -1,6 +1,7 @@
 import { get, ref, update } from "firebase/database";
 import { db } from "../config/firebaseConfig";
 import { gerarId } from "../utils/idGenerator";
+import { obterSaldoDisponivelLote } from "./loteFields";
 
 function gerarCodigoSublote(variedadeNome, dataFormacao) {
   const dataSemTraco = dataFormacao.replaceAll("-", "");
@@ -30,12 +31,13 @@ export async function criarSublote({
 
   const lotePai = lotePaiSnapshot.val();
   const qtd = Number(quantidade);
+  const saldoPai = obterSaldoDisponivelLote(lotePai);
 
   if (qtd <= 0) {
     throw new Error("A quantidade do sublote deve ser maior que zero.");
   }
 
-  if (descontar_do_pai && qtd > Number(lotePai.quantidade_atual)) {
+  if (descontar_do_pai && qtd > saldoPai) {
     throw new Error("A quantidade do sublote é maior que o saldo atual do lote pai.");
   }
 
@@ -54,6 +56,7 @@ export async function criarSublote({
     variedade_nome: lotePai.variedade_nome,
     data_formacao,
     quantidade_inicial: qtd,
+    saldo_disponivel_para_ocupar: qtd,
     quantidade_atual: qtd,
     tipo_lote: "sublote",
     status: "ativo",
@@ -64,8 +67,14 @@ export async function criarSublote({
   updates[`lotes_producao/${subloteId}`] = novoSublote;
 
   if (descontar_do_pai) {
-    const novoSaldoPai = Number(lotePai.quantidade_atual) - qtd;
-    updates[`lotes_producao/${lote_pai_id}/quantidade_atual`] = novoSaldoPai;
+    const novoSaldoPai = saldoPai - qtd;
+
+    updates[`lotes_producao/${lote_pai_id}/saldo_disponivel_para_ocupar`] = novoSaldoPai;
+
+    // legado temporário
+    if (lotePai.quantidade_atual !== undefined) {
+      updates[`lotes_producao/${lote_pai_id}/quantidade_atual`] = novoSaldoPai;
+    }
 
     if (novoSaldoPai === 0) {
       updates[`lotes_producao/${lote_pai_id}/status`] = "transplantado";
