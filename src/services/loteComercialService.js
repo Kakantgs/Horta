@@ -1,5 +1,76 @@
-import { get, ref, update } from "firebase/database";
+import {
+  get,
+  ref,
+  update,
+  query,
+  orderByChild,
+  limitToLast,
+  endBefore
+} from "firebase/database";
 import { db } from "../config/firebaseConfig";
+
+function montarCursor(item) {
+  if (!item) return null;
+
+  return {
+    value: item.data_formacao || "",
+    key: item._cursorKey || item.id
+  };
+}
+
+async function carregarPaginaBrutaLotesComerciais({ limit, cursor = null }) {
+  const constraints = [orderByChild("data_formacao")];
+
+  if (cursor?.value !== undefined && cursor?.key) {
+    constraints.push(endBefore(cursor.value, cursor.key));
+  }
+
+  constraints.push(limitToLast(limit));
+
+  const snapshot = await get(query(ref(db, "lotes_comerciais"), ...constraints));
+
+  if (!snapshot.exists()) return [];
+
+  const itens = [];
+  snapshot.forEach((childSnapshot) => {
+    const valor = childSnapshot.val() || {};
+    itens.push({
+      ...valor,
+      id: valor.id || childSnapshot.key,
+      _cursorKey: childSnapshot.key
+    });
+  });
+
+  return itens;
+}
+
+export async function listarLotesComerciaisPaginado({
+  limit = 20,
+  cursor = null
+}) {
+  const rawBatch = await carregarPaginaBrutaLotesComerciais({
+    limit,
+    cursor
+  });
+
+  if (!rawBatch.length) {
+    return {
+      items: [],
+      nextCursor: null,
+      hasMore: false
+    };
+  }
+
+  const items = [...rawBatch].reverse();
+  const nextCursor = montarCursor(items[items.length - 1]);
+  const hasMore = rawBatch.length === limit;
+
+  return {
+    items,
+    nextCursor: hasMore ? nextCursor : null,
+    hasMore
+  };
+}
 
 export async function listarLotesComerciais() {
   const snapshot = await get(ref(db, "lotes_comerciais"));
@@ -7,7 +78,7 @@ export async function listarLotesComerciais() {
   if (!snapshot.exists()) return [];
 
   return Object.values(snapshot.val()).sort((a, b) =>
-    b.data_formacao.localeCompare(a.data_formacao)
+    (b.data_formacao || "").localeCompare(a.data_formacao || "")
   );
 }
 
