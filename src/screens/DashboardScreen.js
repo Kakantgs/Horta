@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Modal,
-  Button,
   TextInput,
   Alert
 } from "react-native";
@@ -39,8 +38,95 @@ import OptionSelectField from "../components/OptionSelectField";
 import SelectCardList from "../components/SelectCardList";
 import BancadaFaixaBar from "../components/BancadaFaixaBar";
 
+function ActionButton({ title, onPress, disabled = false, variant = "primary" }) {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.actionButton,
+        variant === "danger" && styles.actionButtonDanger,
+        disabled && styles.actionButtonDisabled
+      ]}
+      onPress={onPress}
+      activeOpacity={disabled ? 1 : 0.8}
+      disabled={disabled}
+    >
+      <Text
+        style={[
+          styles.actionButtonText,
+          disabled && styles.actionButtonTextDisabled
+        ]}
+      >
+        {title}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+function obterFaixaInfo(posicaoInicial, posicaoFinal) {
+  const ini = Number(posicaoInicial);
+  const fim = Number(posicaoFinal);
+
+  if (!ini || !fim || ini <= 0 || fim <= 0 || ini > fim) {
+    return {
+      valida: false,
+      inicio: 0,
+      fim: 0,
+      tamanho: 0
+    };
+  }
+
+  return {
+    valida: true,
+    inicio: ini,
+    fim,
+    tamanho: fim - ini + 1
+  };
+}
+
+function faixaConflitaComOcupacoes(
+  ocupacoes,
+  posicaoInicial,
+  posicaoFinal,
+  ignorarOcupacaoId = ""
+) {
+  const ini = Number(posicaoInicial);
+  const fim = Number(posicaoFinal);
+
+  return (ocupacoes || []).some((item) => {
+    if (ignorarOcupacaoId && item.id === ignorarOcupacaoId) return false;
+    if (item.status !== "ativa") return false;
+
+    const iniExistente = Number(item.posicao_inicial);
+    const fimExistente = Number(item.posicao_final);
+
+    return !(fim < iniExistente || ini > fimExistente);
+  });
+}
+
+function obterNivelSaldoLote(lote) {
+  const saldo = Number(lote?.saldo_disponivel_para_ocupar || 0);
+  const inicial = Number(lote?.quantidade_inicial || 0);
+
+  if (saldo <= 0) {
+    return { label: "Sem saldo", tipo: "zerado" };
+  }
+
+  if (!inicial) {
+    if (saldo <= 50) return { label: "Saldo crítico", tipo: "critico" };
+    if (saldo <= 150) return { label: "Saldo baixo", tipo: "baixo" };
+    return { label: "Saldo normal", tipo: "normal" };
+  }
+
+  const percentual = (saldo / inicial) * 100;
+
+  if (percentual <= 10) return { label: "Saldo crítico", tipo: "critico" };
+  if (percentual <= 25) return { label: "Saldo baixo", tipo: "baixo" };
+  return { label: "Saldo normal", tipo: "normal" };
+}
+
 export default function DashboardScreen() {
   const [bancadas, setBancadas] = useState([]);
+  const [lotesResumo, setLotesResumo] = useState([]);
   const [lotesAtivos, setLotesAtivos] = useState([]);
   const [setores, setSetores] = useState([]);
 
@@ -78,6 +164,7 @@ export default function DashboardScreen() {
   const [faixaSugeridaAtual, setFaixaSugeridaAtual] = useState(null);
   const [faixaSugeridaDestino, setFaixaSugeridaDestino] = useState(null);
   const [resumoDestinoTransplante, setResumoDestinoTransplante] = useState(null);
+  const [ocupacoesAtivasDestino, setOcupacoesAtivasDestino] = useState([]);
 
   const OPCOES_TIPO_OCUPACAO_BERCARIO = [
     { label: "Berçário", value: "bercario" }
@@ -121,6 +208,16 @@ export default function DashboardScreen() {
     loteSelecionado?.saldo_disponivel_para_ocupar || 0
   );
 
+  const faixaInformadaAtual = useMemo(
+    () => obterFaixaInfo(posicaoInicial, posicaoFinal),
+    [posicaoInicial, posicaoFinal]
+  );
+
+  const faixaInformadaDestino = useMemo(
+    () => obterFaixaInfo(posicaoInicialDestino, posicaoFinalDestino),
+    [posicaoInicialDestino, posicaoFinalDestino]
+  );
+
   const resumoCapacidade = useMemo(() => {
     if (!bancadaSelecionada) return null;
 
@@ -129,6 +226,33 @@ export default function DashboardScreen() {
       ocupacoesAtivasBancada
     );
   }, [bancadaSelecionada, ocupacoesAtivasBancada]);
+
+  const lotesAtivosOrdenados = useMemo(() => {
+    return [...lotesAtivos].sort((a, b) => {
+      const saldoA = Number(a.saldo_disponivel_para_ocupar || 0);
+      const saldoB = Number(b.saldo_disponivel_para_ocupar || 0);
+
+      if (saldoB !== saldoA) return saldoB - saldoA;
+
+      return (a.codigo_lote || "").localeCompare(b.codigo_lote || "", undefined, {
+        numeric: true
+      });
+    });
+  }, [lotesAtivos]);
+
+  const faixaLivreAtualDisponivel = (resumoCapacidade?.faixasLivres || []).length > 0;
+
+  const maiorFaixaLivreAtual = useMemo(() => {
+    if (!resumoCapacidade?.faixasLivres?.length) return null;
+    return obterMaiorFaixaLivre(resumoCapacidade.faixasLivres);
+  }, [resumoCapacidade]);
+
+  const quantidadeAlocadaNumero = Number(quantidadeAlocada || 0);
+  const quantidadeTransplantadaNumero = Number(quantidadeTransplantada || 0);
+  const quantidadeColhidaNumero = Number(quantidadeColhida || 0);
+  const quantidadePerdaNumero = Number(quantidadePerda || 0);
+
+  const ocupacaoTemSaldo = Number(ocupacaoSelecionada?.quantidade_alocada || 0) > 0;
 
   useEffect(() => {
     if (!bancadaSelecionada || !resumoCapacidade) {
@@ -143,7 +267,7 @@ export default function DashboardScreen() {
 
     setFaixaSugeridaAtual(sugestao);
 
-    if (sugestao) {
+    if (sugestao && !posicaoInicial && !posicaoFinal) {
       setPosicaoInicial(String(sugestao.inicio));
       setPosicaoFinal(String(sugestao.fim));
     }
@@ -154,6 +278,7 @@ export default function DashboardScreen() {
       if (!bancadaDestinoId) {
         setFaixaSugeridaDestino(null);
         setResumoDestinoTransplante(null);
+        setOcupacoesAtivasDestino([]);
         return;
       }
 
@@ -161,10 +286,13 @@ export default function DashboardScreen() {
       if (!bancadaDestino) {
         setFaixaSugeridaDestino(null);
         setResumoDestinoTransplante(null);
+        setOcupacoesAtivasDestino([]);
         return;
       }
 
       const ocupacoesDestino = await listarOcupacoesAtivasPorBancada(bancadaDestinoId);
+      setOcupacoesAtivasDestino(ocupacoesDestino);
+
       const resumoDestino = calcularResumoCapacidade(
         bancadaDestino.capacidade_total,
         ocupacoesDestino
@@ -184,7 +312,7 @@ export default function DashboardScreen() {
 
       setFaixaSugeridaDestino(sugestao);
 
-      if (sugestao) {
+      if (sugestao && !posicaoInicialDestino && !posicaoFinalDestino) {
         setPosicaoInicialDestino(String(sugestao.inicio));
         setPosicaoFinalDestino(String(sugestao.fim));
       }
@@ -254,6 +382,159 @@ export default function DashboardScreen() {
     return { maxX, maxY };
   }, [bancadasFiltradas]);
 
+  const mensagemBloqueioOcupacao = useMemo(() => {
+    if (!bancadaSelecionada) return "Selecione uma bancada.";
+    if (!loteSelecionadoId) return "Selecione um lote.";
+    if (saldoLoteSelecionado <= 0) return "O lote selecionado está sem saldo.";
+    if (!quantidadeAlocadaNumero) return "Informe a quantidade alocada.";
+    if (quantidadeAlocadaNumero > saldoLoteSelecionado) {
+      return "A quantidade informada é maior que o saldo do lote.";
+    }
+    if (!faixaInformadaAtual.valida) {
+      return "Preencha posição inicial e final válidas.";
+    }
+    if (quantidadeAlocadaNumero !== faixaInformadaAtual.tamanho) {
+      return "A quantidade deve ser igual ao tamanho da faixa.";
+    }
+    if (faixaInformadaAtual.fim > Number(bancadaSelecionada.capacidade_total || 0)) {
+      return "A faixa ultrapassa a capacidade da bancada.";
+    }
+    if (
+      faixaConflitaComOcupacoes(
+        ocupacoesAtivasBancada,
+        faixaInformadaAtual.inicio,
+        faixaInformadaAtual.fim
+      )
+    ) {
+      return "A faixa informada conflita com outra ocupação ativa.";
+    }
+    if (!dataInicio) return "Informe a data de início.";
+    if (!tipoOcupacao) return "Informe o tipo de ocupação.";
+    if (!validarDataISO(dataInicio.trim())) {
+      return "A data de início precisa estar válida.";
+    }
+
+    return "";
+  }, [
+    bancadaSelecionada,
+    loteSelecionadoId,
+    saldoLoteSelecionado,
+    quantidadeAlocadaNumero,
+    faixaInformadaAtual,
+    ocupacoesAtivasBancada,
+    dataInicio,
+    tipoOcupacao
+  ]);
+
+  const podeRegistrarOcupacao = mensagemBloqueioOcupacao === "";
+
+  const mensagemBloqueioCancelar = useMemo(() => {
+    if (!ocupacaoSelecionada) return "Selecione uma ocupação ativa.";
+    if (!ocupacaoTemSaldo) return "A ocupação selecionada já está zerada.";
+    return "";
+  }, [ocupacaoSelecionada, ocupacaoTemSaldo]);
+
+  const podeCancelarOcupacao = mensagemBloqueioCancelar === "";
+
+  const mensagemBloqueioTransplante = useMemo(() => {
+    if (!ocupacaoSelecionada) return "Selecione uma ocupação ativa de origem.";
+    if (!ocupacaoTemSaldo) return "A ocupação de origem está sem saldo.";
+    if (!bancadaDestinoId) return "Selecione uma bancada destino.";
+    if (!quantidadeTransplantadaNumero) return "Informe a quantidade transplantada.";
+    if (quantidadeTransplantadaNumero > Number(ocupacaoSelecionada?.quantidade_alocada || 0)) {
+      return "A quantidade transplantada é maior que a quantidade da origem.";
+    }
+    if (!faixaInformadaDestino.valida) {
+      return "Preencha a posição inicial e final do destino.";
+    }
+    if (quantidadeTransplantadaNumero !== faixaInformadaDestino.tamanho) {
+      return "A quantidade transplantada deve ser igual ao tamanho da faixa destino.";
+    }
+
+    const bancadaDestino = bancadas.find((item) => item.id === bancadaDestinoId);
+    if (!bancadaDestino) return "Bancada destino não encontrada.";
+
+    if (faixaInformadaDestino.fim > Number(bancadaDestino.capacidade_total || 0)) {
+      return "A faixa destino ultrapassa a capacidade da bancada.";
+    }
+
+    if (
+      faixaConflitaComOcupacoes(
+        ocupacoesAtivasDestino,
+        faixaInformadaDestino.inicio,
+        faixaInformadaDestino.fim
+      )
+    ) {
+      return "A faixa destino conflita com outra ocupação ativa.";
+    }
+
+    if (!dataTransplante) return "Informe a data do transplante.";
+    if (!validarDataISO(dataTransplante.trim())) {
+      return "A data do transplante precisa estar válida.";
+    }
+
+    return "";
+  }, [
+    ocupacaoSelecionada,
+    ocupacaoTemSaldo,
+    bancadaDestinoId,
+    quantidadeTransplantadaNumero,
+    faixaInformadaDestino,
+    bancadas,
+    ocupacoesAtivasDestino,
+    dataTransplante
+  ]);
+
+  const podeTransplantar = mensagemBloqueioTransplante === "";
+
+  const mensagemBloqueioColheita = useMemo(() => {
+    if (!ocupacaoSelecionada) return "Selecione uma ocupação ativa.";
+    if (!ocupacaoTemSaldo) return "A ocupação selecionada está zerada.";
+    if (!dataColheita) return "Informe a data da colheita.";
+    if (!tipoColheita) return "Informe o tipo de colheita.";
+
+    if (!validarDataISO(dataColheita.trim())) {
+      return "A data da colheita precisa estar válida.";
+    }
+
+    const totalOcupacao = Number(ocupacaoSelecionada?.quantidade_alocada || 0);
+
+    if (quantidadePerdaNumero < 0) {
+      return "A perda não pode ser negativa.";
+    }
+
+    if (tipoColheita === "total") {
+      if (quantidadeColhidaNumero <= 0) {
+        return "A quantidade colhida calculada precisa ser maior que zero.";
+      }
+
+      if (quantidadeColhidaNumero + quantidadePerdaNumero !== totalOcupacao) {
+        return "Na colheita total, colhida + perda deve consumir toda a ocupação.";
+      }
+
+      return "";
+    }
+
+    if (quantidadeColhidaNumero <= 0) {
+      return "Informe a quantidade colhida.";
+    }
+
+    if (quantidadeColhidaNumero + quantidadePerdaNumero > totalOcupacao) {
+      return "Colhida + perda não pode ultrapassar a quantidade da ocupação.";
+    }
+
+    return "";
+  }, [
+    ocupacaoSelecionada,
+    ocupacaoTemSaldo,
+    dataColheita,
+    tipoColheita,
+    quantidadeColhidaNumero,
+    quantidadePerdaNumero
+  ]);
+
+  const podeColher = mensagemBloqueioColheita === "";
+
   async function carregarTudo() {
     try {
       const [bancadasSnapshot, lotes, setoresSnapshot] = await Promise.all([
@@ -270,10 +551,10 @@ export default function DashboardScreen() {
         setoresSnapshot.exists() ? Object.values(setoresSnapshot.val()) : []
       );
 
+      setLotesResumo(lotes);
+
       setLotesAtivos(
-        lotes
-          .filter((lote) => Number(lote.saldo_disponivel_para_ocupar) > 0)
-          .sort((a, b) => (a.codigo_lote || "").localeCompare(b.codigo_lote || ""))
+        lotes.filter((lote) => Number(lote.saldo_disponivel_para_ocupar) > 0)
       );
     } catch (error) {
       Alert.alert("Erro", error.message);
@@ -319,6 +600,7 @@ export default function DashboardScreen() {
       setPosicaoFinalDestino("");
       setFaixaSugeridaDestino(null);
       setResumoDestinoTransplante(null);
+      setOcupacoesAtivasDestino([]);
 
       setDataColheita("");
       setQuantidadeColhida("");
@@ -387,7 +669,8 @@ export default function DashboardScreen() {
   }
 
   function obterResumoVisualDaOcupacao(ocupacao) {
-    const lote = lotesAtivos.find((item) => item.id === ocupacao.lote_producao_id);
+    const lote =
+      lotesResumo.find((item) => item.id === ocupacao.lote_producao_id) || null;
 
     const diasEntrada = calcularDiasDesdeEntrada(lote?.data_formacao);
     const diasOcupacao = calcularDiasNaOcupacao(
@@ -413,56 +696,8 @@ export default function DashboardScreen() {
 
   async function handleRegistrarOcupacao() {
     try {
-      if (
-        !bancadaSelecionada ||
-        !loteSelecionadoId ||
-        !posicaoInicial ||
-        !posicaoFinal ||
-        !quantidadeAlocada ||
-        !dataInicio ||
-        !tipoOcupacao
-      ) {
-        Alert.alert("Campos obrigatórios", "Preencha os campos obrigatórios.");
-        return;
-      }
-
-      const qtd = Number(quantidadeAlocada);
-      const faixa = Number(posicaoFinal) - Number(posicaoInicial) + 1;
-
-      if (qtd <= 0) {
-        Alert.alert("Quantidade inválida", "A quantidade deve ser maior que zero.");
-        return;
-      }
-
-      if (saldoLoteSelecionado <= 0) {
-        Alert.alert(
-          "Sem saldo",
-          "O lote selecionado não possui saldo disponível para nova ocupação."
-        );
-        return;
-      }
-
-      if (qtd > saldoLoteSelecionado) {
-        Alert.alert(
-          "Saldo insuficiente",
-          `O lote possui saldo disponível de ${saldoLoteSelecionado} unidade(s).`
-        );
-        return;
-      }
-
-      if (qtd !== faixa) {
-        Alert.alert(
-          "Faixa incompatível",
-          "A quantidade alocada deve ser igual ao tamanho da faixa."
-        );
-        return;
-      }
-
-      if (!validarDataISO(dataInicio.trim())) {
-        Alert.alert(
-          "Data inválida",
-          "A data deve estar no formato YYYY-MM-DD e ser válida."
-        );
+      if (!podeRegistrarOcupacao) {
+        Alert.alert("Não foi possível registrar", mensagemBloqueioOcupacao);
         return;
       }
 
@@ -476,11 +711,12 @@ export default function DashboardScreen() {
         tipo_ocupacao: tipoOcupacao
       });
 
-      const saldoRestante = Math.max(0, saldoLoteSelecionado - qtd);
-
       Alert.alert(
         "Ocupação registrada",
-        `O lote foi alocado com sucesso.\n\nSaldo restante do lote: ${saldoRestante}`
+        `O lote foi alocado com sucesso.\n\nSaldo restante do lote: ${Math.max(
+          0,
+          saldoLoteSelecionado - quantidadeAlocadaNumero
+        )}`
       );
 
       setLoteSelecionadoId("");
@@ -535,53 +771,12 @@ export default function DashboardScreen() {
 
   async function handleTransplante() {
     try {
-      if (
-        !ocupacaoSelecionada ||
-        !bancadaDestinoId ||
-        !quantidadeTransplantada ||
-        !dataTransplante ||
-        !posicaoInicialDestino ||
-        !posicaoFinalDestino
-      ) {
-        Alert.alert(
-          "Campos obrigatórios",
-          "Preencha todos os campos do transplante."
-        );
+      if (!podeTransplantar) {
+        Alert.alert("Não foi possível transplantar", mensagemBloqueioTransplante);
         return;
       }
 
-      const qtd = Number(quantidadeTransplantada);
-      const faixa = Number(posicaoFinalDestino) - Number(posicaoInicialDestino) + 1;
-      const qtdOrigem = Number(ocupacaoSelecionada.quantidade_alocada || 0);
-
-      if (qtd <= 0) {
-        Alert.alert("Quantidade inválida", "A quantidade transplantada deve ser maior que zero.");
-        return;
-      }
-
-      if (qtd > qtdOrigem) {
-        Alert.alert(
-          "Quantidade inválida",
-          `A ocupação de origem possui ${qtdOrigem} unidade(s).`
-        );
-        return;
-      }
-
-      if (qtd !== faixa) {
-        Alert.alert(
-          "Faixa incompatível",
-          "A quantidade transplantada deve ser igual ao tamanho da faixa destino."
-        );
-        return;
-      }
-
-      if (!validarDataISO(dataTransplante.trim())) {
-        Alert.alert(
-          "Data inválida",
-          "A data do transplante deve estar no formato YYYY-MM-DD e ser válida."
-        );
-        return;
-      }
+      const qtdOrigem = Number(ocupacaoSelecionada?.quantidade_alocada || 0);
 
       await transplantarParaOutraBancada({
         ocupacao_origem_id: ocupacaoSelecionada.id,
@@ -592,11 +787,12 @@ export default function DashboardScreen() {
         posicao_final_destino: posicaoFinalDestino
       });
 
-      const restanteOrigem = Math.max(0, qtdOrigem - qtd);
-
       Alert.alert(
         "Transplante realizado",
-        `O transplante foi concluído.\n\nPermanece na origem: ${restanteOrigem}\n\nObservação: o transplante move entre ocupações e não consome novo saldo disponível do lote.`
+        `O transplante foi concluído.\n\nPermanece na origem: ${Math.max(
+          0,
+          qtdOrigem - quantidadeTransplantadaNumero
+        )}\n\nObservação: o transplante move entre ocupações e não consome novo saldo disponível do lote.`
       );
 
       setBancadaDestinoId("");
@@ -607,6 +803,7 @@ export default function DashboardScreen() {
       setPosicaoFinalDestino("");
       setFaixaSugeridaDestino(null);
       setResumoDestinoTransplante(null);
+      setOcupacoesAtivasDestino([]);
 
       await carregarTudo();
       await carregarDetalhesBancada(bancadaSelecionada);
@@ -617,24 +814,8 @@ export default function DashboardScreen() {
 
   async function handleColher() {
     try {
-      if (!ocupacaoSelecionada) {
-        Alert.alert("Seleção obrigatória", "Selecione uma ocupação ativa para colher.");
-        return;
-      }
-
-      if (!dataColheita || !quantidadeColhida || !tipoColheita) {
-        Alert.alert(
-          "Campos obrigatórios",
-          "Preencha data, quantidade colhida e tipo de colheita."
-        );
-        return;
-      }
-
-      if (!validarDataISO(dataColheita.trim())) {
-        Alert.alert(
-          "Data inválida",
-          "A data da colheita deve estar no formato YYYY-MM-DD e ser válida."
-        );
+      if (!podeColher) {
+        Alert.alert("Não foi possível colher", mensagemBloqueioColheita);
         return;
       }
 
@@ -705,10 +886,7 @@ export default function DashboardScreen() {
     const qtd = Math.min(Number(maior.tamanho), saldoLote);
 
     if (qtd <= 0) {
-      Alert.alert(
-        "Sem saldo",
-        "Esse lote não possui saldo disponível para ocupar."
-      );
+      Alert.alert("Sem saldo", "Esse lote não possui saldo disponível para ocupar.");
       return;
     }
 
@@ -899,7 +1077,10 @@ export default function DashboardScreen() {
                           Livre: {faixa.inicio} até {faixa.fim}
                         </Text>
                         <Text>Tamanho: {faixa.tamanho}</Text>
-                        <Button title="Usar faixa" onPress={() => usarFaixaLivre(faixa)} />
+                        <ActionButton
+                          title="USAR FAIXA"
+                          onPress={() => usarFaixaLivre(faixa)}
+                        />
                       </View>
                     ))
                   )}
@@ -954,10 +1135,17 @@ export default function DashboardScreen() {
                         <Text>Variedade: {resumo.lote?.variedade_nome || "-"}</Text>
 
                         <View style={{ marginTop: 8 }}>
-                          <Button
-                            title="Cancelar ocupação (correção)"
+                          <ActionButton
+                            title="CANCELAR OCUPAÇÃO (CORREÇÃO)"
                             onPress={() => handleCancelarOcupacao(item.id)}
+                            variant="danger"
+                            disabled={ocupacaoSelecionadaId !== item.id || !podeCancelarOcupacao}
                           />
+                          {ocupacaoSelecionadaId === item.id && !!mensagemBloqueioCancelar ? (
+                            <Text style={styles.feedbackBloqueio}>
+                              {mensagemBloqueioCancelar}
+                            </Text>
+                          ) : null}
                         </View>
                       </View>
                     );
@@ -969,14 +1157,27 @@ export default function DashboardScreen() {
 
               <SelectCardList
                 title="Escolher lote"
-                items={lotesAtivos}
+                items={lotesAtivosOrdenados}
                 selectedId={loteSelecionadoId}
                 onSelect={setLoteSelecionadoId}
                 emptyMessage="Nenhum lote ativo disponível."
-                getTitle={(item) => item.codigo_lote}
-                getSubtitle={(item) =>
-                  `${item.variedade_nome} | Saldo disponível: ${item.saldo_disponivel_para_ocupar}`
-                }
+                getTitle={(item) => {
+                  const nivel = obterNivelSaldoLote(item);
+
+                  if (nivel.tipo === "critico") {
+                    return `${item.codigo_lote} • SALDO CRÍTICO`;
+                  }
+
+                  if (nivel.tipo === "baixo") {
+                    return `${item.codigo_lote} • SALDO BAIXO`;
+                  }
+
+                  return item.codigo_lote;
+                }}
+                getSubtitle={(item) => {
+                  const nivel = obterNivelSaldoLote(item);
+                  return `${item.variedade_nome} | Saldo disponível: ${item.saldo_disponivel_para_ocupar} | ${nivel.label}`;
+                }}
               />
 
               {loteSelecionado ? (
@@ -990,15 +1191,14 @@ export default function DashboardScreen() {
                   <Text>Código: {loteSelecionado.codigo_lote}</Text>
                   <Text>Variedade: {loteSelecionado.variedade_nome}</Text>
                   <Text>Saldo disponível para nova ocupação: {saldoLoteSelecionado}</Text>
-                  {saldoLoteSelecionado <= 0 ? (
-                    <Text style={styles.textoAlerta}>
-                      Esse lote não possui saldo disponível e não deve mais ser usado para nova ocupação.
-                    </Text>
+                  {maiorFaixaLivreAtual ? (
+                    <Text>Maior faixa livre na bancada: {maiorFaixaLivreAtual.tamanho}</Text>
                   ) : (
-                    <Text style={styles.textoSuave}>
-                      A ocupação vai consumir diretamente esse saldo.
-                    </Text>
+                    <Text>Maior faixa livre na bancada: 0</Text>
                   )}
+                  <Text style={styles.textoSuave}>
+                    Você pode ocupar menos que o saldo, desde que a faixa seja válida.
+                  </Text>
                 </View>
               ) : (
                 <Text style={styles.aviso}>
@@ -1007,8 +1207,8 @@ export default function DashboardScreen() {
               )}
 
               <View style={{ marginBottom: 10 }}>
-                <Button
-                  title="Preencher pelo saldo do lote"
+                <ActionButton
+                  title="PREENCHER PELO SALDO DO LOTE"
                   onPress={() => {
                     if (!loteSelecionadoId) {
                       Alert.alert("Seleção obrigatória", "Selecione um lote primeiro.");
@@ -1047,6 +1247,7 @@ export default function DashboardScreen() {
                     setPosicaoInicial(String(primeiraFaixa.inicio));
                     setPosicaoFinal(String(primeiraFaixa.inicio + qtd - 1));
                   }}
+                  disabled={!loteSelecionadoId || !faixaLivreAtualDisponivel || saldoLoteSelecionado <= 0}
                 />
               </View>
 
@@ -1056,7 +1257,11 @@ export default function DashboardScreen() {
                 value={quantidadeAlocada}
                 onChangeText={setQuantidadeAlocada}
                 keyboardType="numeric"
-                placeholder="Informe a quantidade a ocupar"
+                placeholder={
+                  saldoLoteSelecionado > 0
+                    ? `Máximo pelo saldo: ${saldoLoteSelecionado}`
+                    : "Informe a quantidade a ocupar"
+                }
               />
 
               {loteSelecionado && quantidadeAlocada ? (
@@ -1078,7 +1283,7 @@ export default function DashboardScreen() {
 
               {faixaSugeridaAtual ? (
                 <View style={styles.cardSugestao}>
-                  <Text style={styles.cardTitulo}>Faixa sugerida</Text>
+                  <Text style={styles.cardTitulo}>Sugestão automática</Text>
                   <Text>
                     Usar de {faixaSugeridaAtual.inicio} até {faixaSugeridaAtual.fim}
                   </Text>
@@ -1087,27 +1292,23 @@ export default function DashboardScreen() {
                     {faixaSugeridaAtual.faixa_original_fim}
                   </Text>
                   <Text>
-                    Tamanho da faixa livre original:{" "}
-                    {faixaSugeridaAtual.tamanho_faixa_original}
+                    Você pode aceitar essa sugestão ou informar uma faixa menor manualmente.
                   </Text>
 
                   <View style={{ marginTop: 8 }}>
-                    <Button
-                      title="Usar próxima faixa livre"
+                    <ActionButton
+                      title="USAR SUGESTÃO"
                       onPress={usarFaixaSugeridaAtual}
                     />
                   </View>
                 </View>
-              ) : quantidadeAlocada ? (
-                <Text style={styles.aviso}>
-                  Nenhuma faixa livre comporta essa quantidade.
-                </Text>
               ) : null}
 
               <View style={{ marginBottom: 10 }}>
-                <Button
-                  title="Usar faixa inteira restante"
+                <ActionButton
+                  title="USAR FAIXA INTEIRA RESTANTE"
                   onPress={usarFaixaInteiraRestante}
+                  disabled={!loteSelecionadoId || !faixaLivreAtualDisponivel || saldoLoteSelecionado <= 0}
                 />
               </View>
 
@@ -1127,6 +1328,12 @@ export default function DashboardScreen() {
                 keyboardType="numeric"
               />
 
+              {faixaInformadaAtual.valida ? (
+                <View style={styles.cardSugestao}>
+                  <Text>Tamanho da faixa informada: {faixaInformadaAtual.tamanho}</Text>
+                </View>
+              ) : null}
+
               <DatePickerField
                 label="Data de início"
                 value={dataInicio}
@@ -1145,22 +1352,45 @@ export default function DashboardScreen() {
                 }
               />
 
-              <Button title="Registrar ocupação" onPress={handleRegistrarOcupacao} />
+              {!!mensagemBloqueioOcupacao ? (
+                <Text style={styles.feedbackBloqueio}>{mensagemBloqueioOcupacao}</Text>
+              ) : (
+                <Text style={styles.feedbackOk}>
+                  Tudo certo para registrar a ocupação.
+                </Text>
+              )}
 
-              {bancadaSelecionada?.tipo === "bercario" && ocupacaoSelecionada && (
+              <ActionButton
+                title="REGISTRAR OCUPAÇÃO"
+                onPress={handleRegistrarOcupacao}
+                disabled={!podeRegistrarOcupacao}
+              />
+
+              {bancadaSelecionada?.tipo === "bercario" && (
                 <>
                   <Text style={styles.subsecao}>Transplante para final</Text>
 
-                  <View style={styles.cardSugestao}>
-                    <Text style={styles.cardTitulo}>Origem do transplante</Text>
-                    <Text>Quantidade atual na origem: {ocupacaoSelecionada.quantidade_alocada}</Text>
-                    <Text>
-                      Faixa atual: {ocupacaoSelecionada.posicao_inicial} até {ocupacaoSelecionada.posicao_final}
-                    </Text>
-                    <Text style={styles.textoSuave}>
-                      O transplante move plantas da ocupação de origem para a bancada final. Ele não consome novo saldo do lote.
-                    </Text>
-                  </View>
+                  {ocupacaoSelecionada ? (
+                    <View style={styles.cardSugestao}>
+                      <Text style={styles.cardTitulo}>Origem do transplante</Text>
+                      <Text>
+                        Quantidade atual na origem: {ocupacaoSelecionada.quantidade_alocada}
+                      </Text>
+                      <Text>
+                        Faixa atual: {ocupacaoSelecionada.posicao_inicial} até{" "}
+                        {ocupacaoSelecionada.posicao_final}
+                      </Text>
+                      <Text style={styles.textoSuave}>
+                        Você pode transplantar só uma parte, desde que a faixa destino seja válida.
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.cardAviso}>
+                      <Text style={styles.cardAvisoTexto}>
+                        Selecione uma ocupação para iniciar o transplante.
+                      </Text>
+                    </View>
+                  )}
 
                   <Text style={styles.label}>Buscar bancada destino</Text>
                   <TextInput
@@ -1191,16 +1421,18 @@ export default function DashboardScreen() {
                   )}
 
                   <View style={{ marginBottom: 8 }}>
-                    <Button
-                      title="Preencher próxima faixa livre"
+                    <ActionButton
+                      title="PREENCHER PRÓXIMA FAIXA LIVRE"
                       onPress={preencherProximaFaixaLivreDestino}
+                      disabled={!ocupacaoSelecionada || !(resumoDestinoTransplante?.faixasLivres || []).length}
                     />
                   </View>
 
                   <View style={{ marginBottom: 8 }}>
-                    <Button
-                      title="Preencher maior faixa livre"
+                    <ActionButton
+                      title="PREENCHER MAIOR FAIXA LIVRE"
                       onPress={preencherMaiorFaixaLivreDestino}
+                      disabled={!ocupacaoSelecionada || !(resumoDestinoTransplante?.faixasLivres || []).length}
                     />
                   </View>
 
@@ -1210,6 +1442,11 @@ export default function DashboardScreen() {
                     value={quantidadeTransplantada}
                     onChangeText={setQuantidadeTransplantada}
                     keyboardType="numeric"
+                    placeholder={
+                      ocupacaoSelecionada
+                        ? `Máximo na origem: ${ocupacaoSelecionada.quantidade_alocada}`
+                        : "Informe a quantidade"
+                    }
                   />
 
                   {ocupacaoSelecionada && quantidadeTransplantada ? (
@@ -1227,26 +1464,21 @@ export default function DashboardScreen() {
 
                   {faixaSugeridaDestino ? (
                     <View style={styles.cardSugestao}>
-                      <Text style={styles.cardTitulo}>Faixa sugerida no destino</Text>
+                      <Text style={styles.cardTitulo}>Sugestão automática no destino</Text>
                       <Text>
                         Usar de {faixaSugeridaDestino.inicio} até {faixaSugeridaDestino.fim}
                       </Text>
                       <Text>
-                        Dentro da faixa livre {faixaSugeridaDestino.faixa_original_inicio} até{" "}
-                        {faixaSugeridaDestino.faixa_original_fim}
+                        Você pode aceitar essa sugestão ou informar uma faixa menor manualmente.
                       </Text>
 
                       <View style={{ marginTop: 8 }}>
-                        <Button
-                          title="Usar próxima faixa livre no destino"
+                        <ActionButton
+                          title="USAR SUGESTÃO DO DESTINO"
                           onPress={usarFaixaSugeridaDestino}
                         />
                       </View>
                     </View>
-                  ) : quantidadeTransplantada && bancadaDestinoId ? (
-                    <Text style={styles.aviso}>
-                      Nenhuma faixa livre no destino comporta essa quantidade.
-                    </Text>
                   ) : null}
 
                   <DatePickerField
@@ -1272,13 +1504,39 @@ export default function DashboardScreen() {
                     keyboardType="numeric"
                   />
 
-                  <Button title="Realizar transplante" onPress={handleTransplante} />
+                  {faixaInformadaDestino.valida ? (
+                    <View style={styles.cardSugestao}>
+                      <Text>Tamanho da faixa destino: {faixaInformadaDestino.tamanho}</Text>
+                    </View>
+                  ) : null}
+
+                  {!!mensagemBloqueioTransplante ? (
+                    <Text style={styles.feedbackBloqueio}>{mensagemBloqueioTransplante}</Text>
+                  ) : (
+                    <Text style={styles.feedbackOk}>
+                      Tudo certo para realizar o transplante.
+                    </Text>
+                  )}
+
+                  <ActionButton
+                    title="REALIZAR TRANSPLANTE"
+                    onPress={handleTransplante}
+                    disabled={!podeTransplantar}
+                  />
                 </>
               )}
 
-              {bancadaSelecionada?.tipo === "final" && ocupacaoSelecionada && (
+              {bancadaSelecionada?.tipo === "final" && (
                 <>
                   <Text style={styles.subsecao}>Colheita</Text>
+
+                  {!ocupacaoSelecionada ? (
+                    <View style={styles.cardAviso}>
+                      <Text style={styles.cardAvisoTexto}>
+                        Selecione uma ocupação para registrar a colheita.
+                      </Text>
+                    </View>
+                  ) : null}
 
                   <DatePickerField
                     label="Data da colheita"
@@ -1294,6 +1552,11 @@ export default function DashboardScreen() {
                     onChangeText={setQuantidadeColhida}
                     keyboardType="numeric"
                     editable={tipoColheita !== "total"}
+                    placeholder={
+                      ocupacaoSelecionada
+                        ? `Máximo na ocupação: ${ocupacaoSelecionada.quantidade_alocada}`
+                        : "Informe a quantidade"
+                    }
                   />
 
                   <Text style={styles.label}>Quantidade perda</Text>
@@ -1325,7 +1588,19 @@ export default function DashboardScreen() {
                     </View>
                   ) : null}
 
-                  <Button title="Registrar colheita" onPress={handleColher} />
+                  {!!mensagemBloqueioColheita ? (
+                    <Text style={styles.feedbackBloqueio}>{mensagemBloqueioColheita}</Text>
+                  ) : (
+                    <Text style={styles.feedbackOk}>
+                      Tudo certo para registrar a colheita.
+                    </Text>
+                  )}
+
+                  <ActionButton
+                    title="REGISTRAR COLHEITA"
+                    onPress={handleColher}
+                    disabled={!podeColher}
+                  />
 
                   <Text style={styles.subsecao}>Histórico de colheitas</Text>
                   {colheitas.length === 0 ? (
@@ -1345,7 +1620,10 @@ export default function DashboardScreen() {
               )}
 
               <View style={{ height: 14 }} />
-              <Button title="Fechar" onPress={() => setModalVisible(false)} />
+              <ActionButton
+                title="FECHAR"
+                onPress={() => setModalVisible(false)}
+              />
             </View>
           </ScrollView>
         </View>
@@ -1459,6 +1737,17 @@ const styles = StyleSheet.create({
     borderColor: "#e74c3c",
     backgroundColor: "#fdecea"
   },
+  cardAviso: {
+    borderWidth: 1,
+    borderColor: "#f5c06a",
+    backgroundColor: "#fff7e8",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10
+  },
+  cardAvisoTexto: {
+    color: "#8a5b00"
+  },
   cardTitulo: {
     fontWeight: "bold",
     marginBottom: 4
@@ -1488,5 +1777,40 @@ const styles = StyleSheet.create({
   textoSuave: {
     marginTop: 6,
     color: "#2c3e50"
+  },
+  feedbackBloqueio: {
+    color: "#c0392b",
+    marginBottom: 10,
+    fontWeight: "600"
+  },
+  feedbackOk: {
+    color: "#1e8449",
+    marginBottom: 10,
+    fontWeight: "600"
+  },
+  actionButton: {
+    backgroundColor: "#2196F3",
+    borderRadius: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8
+  },
+  actionButtonDanger: {
+    backgroundColor: "#d32f2f"
+  },
+  actionButtonDisabled: {
+    backgroundColor: "#9e9e9e"
+  },
+  actionButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    textTransform: "uppercase"
+  },
+  actionButtonTextDisabled: {
+    color: "#f5f5f5",
+    fontWeight: "bold",
+    textTransform: "uppercase"
   }
 });
