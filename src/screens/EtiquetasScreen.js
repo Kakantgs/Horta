@@ -4,9 +4,9 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
-  Button
+  Alert,
+  TouchableOpacity
 } from "react-native";
 import {
   compartilharPdfEtiqueta,
@@ -16,10 +16,49 @@ import {
 } from "../services/etiquetaService";
 import { obterDadosUnidade } from "../services/unitDataService";
 import OptionSelectField from "../components/OptionSelectField";
+import SelectCardList from "../components/SelectCardList";
+import DatePickerField from "../components/DatePickerField";
+
+const PAGE_SIZE_ETIQUETAS = 20;
+
+function ActionButton({ title, onPress, disabled = false, variant = "primary" }) {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.actionButton,
+        variant === "secondary" && styles.actionButtonSecondary,
+        disabled && styles.actionButtonDisabled
+      ]}
+      onPress={onPress}
+      activeOpacity={disabled ? 1 : 0.8}
+      disabled={disabled}
+    >
+      <Text
+        style={[
+          styles.actionButtonText,
+          disabled && styles.actionButtonTextDisabled
+        ]}
+      >
+        {title}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+function formatarDataBR(dataISO) {
+  if (!dataISO || !String(dataISO).includes("-")) return dataISO || "-";
+  const [ano, mes, dia] = String(dataISO).split("-");
+  return `${dia}/${mes}/${ano}`;
+}
 
 export default function EtiquetasScreen({ onVoltar }) {
   const [lotes, setLotes] = useState([]);
   const [loteComercialId, setLoteComercialId] = useState("");
+
+  const [buscaLote, setBuscaLote] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState("");
+  const [filtroVariedade, setFiltroVariedade] = useState("");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE_ETIQUETAS);
 
   const [produtorNome, setProdutorNome] = useState("");
   const [produtorCnpj, setProdutorCnpj] = useState("");
@@ -41,9 +80,20 @@ export default function EtiquetasScreen({ onVoltar }) {
     { label: "80 x 100 mm", value: "80x100" }
   ];
 
+  const OPCOES_STATUS = [
+    { label: "Todos", value: "" },
+    { label: "Disponível", value: "disponivel" },
+    { label: "Parcial", value: "parcial" },
+    { label: "Vendido", value: "vendido" }
+  ];
+
   useEffect(() => {
     carregar();
   }, []);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE_ETIQUETAS);
+  }, [buscaLote, filtroStatus, filtroVariedade]);
 
   async function carregar() {
     try {
@@ -59,7 +109,7 @@ export default function EtiquetasScreen({ onVoltar }) {
       setOrigemTexto(dadosUnidade.origem_padrao || "");
       setLocalProducao(dadosUnidade.local_producao_padrao || "");
     } catch (error) {
-      alert(error.message);
+      Alert.alert("Erro", error.message);
     }
   }
 
@@ -68,10 +118,56 @@ export default function EtiquetasScreen({ onVoltar }) {
     [lotes, loteComercialId]
   );
 
+  const opcoesVariedade = useMemo(() => {
+    const unicas = [...new Set(lotes.map((item) => item.variedade_nome).filter(Boolean))];
+
+    return [
+      { label: "Todas", value: "" },
+      ...unicas
+        .sort((a, b) => a.localeCompare(b))
+        .map((nome) => ({ label: nome, value: nome }))
+    ];
+  }, [lotes]);
+
+  const lotesFiltrados = useMemo(() => {
+    const termo = buscaLote.trim().toLowerCase();
+
+    let lista = [...lotes];
+
+    if (termo) {
+      lista = lista.filter((item) => {
+        return (
+          (item.codigo_lote_comercial || "").toLowerCase().includes(termo) ||
+          (item.codigo_lote_producao || "").toLowerCase().includes(termo) ||
+          (item.variedade_nome || "").toLowerCase().includes(termo)
+        );
+      });
+    }
+
+    if (filtroStatus) {
+      lista = lista.filter(
+        (item) => (item.status || "").toLowerCase() === filtroStatus.toLowerCase()
+      );
+    }
+
+    if (filtroVariedade) {
+      lista = lista.filter(
+        (item) => (item.variedade_nome || "") === filtroVariedade
+      );
+    }
+
+    lista.sort((a, b) => (b.data_formacao || "").localeCompare(a.data_formacao || ""));
+    return lista;
+  }, [lotes, buscaLote, filtroStatus, filtroVariedade]);
+
+  const lotesVisiveis = useMemo(() => {
+    return lotesFiltrados.slice(0, visibleCount);
+  }, [lotesFiltrados, visibleCount]);
+
   async function handleMontarPreview() {
     try {
       if (!loteComercialId) {
-        alert("Selecione um lote comercial.");
+        Alert.alert("Validação", "Selecione um lote comercial.");
         return;
       }
 
@@ -95,7 +191,7 @@ export default function EtiquetasScreen({ onVoltar }) {
       setDadosEtiqueta(dados);
       setOrigemTexto(dados.origemTexto || "");
     } catch (error) {
-      alert(error.message);
+      Alert.alert("Erro", error.message);
     } finally {
       setCarregando(false);
     }
@@ -104,15 +200,15 @@ export default function EtiquetasScreen({ onVoltar }) {
   async function handleGerarPdf() {
     try {
       if (!dadosEtiqueta) {
-        alert("Monte a etiqueta primeiro.");
+        Alert.alert("Validação", "Monte a etiqueta primeiro.");
         return;
       }
 
       setCarregando(true);
       const resultado = await gerarPdfEtiqueta(dadosEtiqueta);
-      alert(`PDF gerado com sucesso!\n${resultado.uri}`);
+      Alert.alert("Sucesso", `PDF gerado com sucesso.\n${resultado.uri}`);
     } catch (error) {
-      alert(error.message);
+      Alert.alert("Erro", error.message);
     } finally {
       setCarregando(false);
     }
@@ -121,14 +217,14 @@ export default function EtiquetasScreen({ onVoltar }) {
   async function handleCompartilhar() {
     try {
       if (!dadosEtiqueta) {
-        alert("Monte a etiqueta primeiro.");
+        Alert.alert("Validação", "Monte a etiqueta primeiro.");
         return;
       }
 
       setCarregando(true);
       await compartilharPdfEtiqueta(dadosEtiqueta);
     } catch (error) {
-      alert(error.message);
+      Alert.alert("Erro", error.message);
     } finally {
       setCarregando(false);
     }
@@ -144,32 +240,69 @@ export default function EtiquetasScreen({ onVoltar }) {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      {onVoltar ? <Button title="Voltar" onPress={onVoltar} /> : null}
+      {onVoltar ? <ActionButton title="VOLTAR" onPress={onVoltar} /> : null}
 
       <Text style={styles.titulo}>Etiquetas térmicas</Text>
 
       <Text style={styles.subtitulo}>Selecionar lote comercial</Text>
-      {lotes.map((item) => (
-        <TouchableOpacity
-          key={item.id}
-          style={[
-            styles.card,
-            loteComercialId === item.id && styles.cardSelecionado
-          ]}
-          onPress={() => setLoteComercialId(item.id)}
-        >
-          <Text style={styles.cardTitulo}>{item.codigo_lote_comercial}</Text>
-          <Text>Variedade: {item.variedade_nome}</Text>
-          <Text>Lote produção: {item.codigo_lote_producao}</Text>
-          <Text>Disponível: {item.quantidade_disponivel}</Text>
-        </TouchableOpacity>
-      ))}
+
+      <Text style={styles.label}>Buscar lote</Text>
+      <TextInput
+        style={styles.input}
+        value={buscaLote}
+        onChangeText={setBuscaLote}
+        placeholder="Código do lote, lote de produção ou variedade"
+      />
+
+      <OptionSelectField
+        label="Filtrar por status"
+        value={filtroStatus}
+        onChange={setFiltroStatus}
+        options={OPCOES_STATUS}
+      />
+
+      <OptionSelectField
+        label="Filtrar por variedade"
+        value={filtroVariedade}
+        onChange={setFiltroVariedade}
+        options={opcoesVariedade}
+      />
+
+      <Text style={styles.contadorLista}>
+        Mostrando {lotesVisiveis.length} de {lotesFiltrados.length} lote(s) comerciais.
+      </Text>
+
+      <SelectCardList
+        title="Escolher lote comercial"
+        items={lotesVisiveis}
+        selectedId={loteComercialId}
+        onSelect={(id) => {
+          setLoteComercialId(id);
+          setDadosEtiqueta(null);
+        }}
+        emptyMessage="Nenhum lote comercial encontrado."
+        getTitle={(item) => item.codigo_lote_comercial}
+        getSubtitle={(item) =>
+          `${item.variedade_nome} | Produção: ${item.codigo_lote_producao}\nFormação: ${formatarDataBR(item.data_formacao)} | Disponível: ${item.quantidade_disponivel} | Status: ${item.status}`
+        }
+      />
+
+      {lotesVisiveis.length < lotesFiltrados.length ? (
+        <ActionButton
+          title={`CARREGAR MAIS LOTES (+${PAGE_SIZE_ETIQUETAS})`}
+          onPress={() => setVisibleCount((prev) => prev + PAGE_SIZE_ETIQUETAS)}
+        />
+      ) : null}
 
       {loteSelecionado ? (
         <View style={styles.cardDestaque}>
           <Text style={styles.cardTitulo}>Lote selecionado</Text>
-          <Text>{loteSelecionado.codigo_lote_comercial}</Text>
+          <Text>Lote comercial: {loteSelecionado.codigo_lote_comercial}</Text>
           <Text>Variedade: {loteSelecionado.variedade_nome}</Text>
+          <Text>Lote produção: {loteSelecionado.codigo_lote_producao}</Text>
+          <Text>Data de formação: {formatarDataBR(loteSelecionado.data_formacao)}</Text>
+          <Text>Disponível: {loteSelecionado.quantidade_disponivel}</Text>
+          <Text>Status: {loteSelecionado.status}</Text>
         </View>
       ) : null}
 
@@ -196,17 +329,14 @@ export default function EtiquetasScreen({ onVoltar }) {
         placeholder="Será preenchida automaticamente"
       />
 
-      <Text style={styles.label}>Data da embalagem</Text>
-      <TextInput
-        style={styles.input}
+      <DatePickerField
+        label="Data da embalagem"
         value={dataEmbalagem}
-        onChangeText={setDataEmbalagem}
-        placeholder="YYYY-MM-DD"
+        onChange={setDataEmbalagem}
+        placeholder="Selecionar data"
       />
 
-      <View style={{ marginBottom: 10 }}>
-        <Button title="Usar data de hoje" onPress={preencherDataHoje} />
-      </View>
+      <ActionButton title="USAR DATA DE HOJE" onPress={preencherDataHoje} />
 
       <Text style={styles.label}>URL base do QR</Text>
       <TextInput
@@ -249,24 +379,20 @@ export default function EtiquetasScreen({ onVoltar }) {
         placeholder="Opcional"
       />
 
-      <Button
-        title={carregando ? "Processando..." : "Montar preview"}
+      <ActionButton
+        title={carregando ? "PROCESSANDO..." : "MONTAR PREVIEW"}
         onPress={handleMontarPreview}
         disabled={carregando}
       />
 
-      <View style={{ height: 10 }} />
-
-      <Button
-        title="Gerar PDF"
+      <ActionButton
+        title="GERAR PDF"
         onPress={handleGerarPdf}
         disabled={!dadosEtiqueta || carregando}
       />
 
-      <View style={{ height: 10 }} />
-
-      <Button
-        title="Compartilhar PDF"
+      <ActionButton
+        title="COMPARTILHAR PDF"
         onPress={handleCompartilhar}
         disabled={!dadosEtiqueta || carregando}
       />
@@ -282,8 +408,8 @@ export default function EtiquetasScreen({ onVoltar }) {
             <Text>CNPJ: {dadosEtiqueta.produtorCnpj || "-"}</Text>
             <Text>Origem: {dadosEtiqueta.origemTexto || "-"}</Text>
             <Text style={styles.previewLote}>Lote: {dadosEtiqueta.lote}</Text>
-            <Text>Colheita: {dadosEtiqueta.dataColheita}</Text>
-            <Text>Embalagem: {dadosEtiqueta.dataEmbalagem}</Text>
+            <Text>Colheita: {formatarDataBR(dadosEtiqueta.dataColheita)}</Text>
+            <Text>Embalagem: {formatarDataBR(dadosEtiqueta.dataEmbalagem)}</Text>
             <Text>
               Última final:{" "}
               {dadosEtiqueta.ultimaFinal?.bancada?.codigo
@@ -314,6 +440,11 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginBottom: 10
   },
+  contadorLista: {
+    color: "#555",
+    marginBottom: 8,
+    fontWeight: "600"
+  },
   label: {
     fontWeight: "bold",
     marginTop: 8,
@@ -326,24 +457,14 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 8
   },
-  card: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8
-  },
-  cardSelecionado: {
-    borderColor: "#2e86de",
-    backgroundColor: "#eaf3ff"
-  },
   cardDestaque: {
     borderWidth: 1,
     borderColor: "#7fb3d5",
     backgroundColor: "#eef7fc",
     borderRadius: 8,
     padding: 12,
-    marginTop: 12
+    marginTop: 12,
+    marginBottom: 12
   },
   cardTitulo: {
     fontWeight: "bold",
@@ -359,5 +480,30 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "bold",
     marginVertical: 10
+  },
+  actionButton: {
+    backgroundColor: "#2196F3",
+    borderRadius: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8
+  },
+  actionButtonSecondary: {
+    backgroundColor: "#1976d2"
+  },
+  actionButtonDisabled: {
+    backgroundColor: "#9e9e9e"
+  },
+  actionButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    textTransform: "uppercase"
+  },
+  actionButtonTextDisabled: {
+    color: "#f5f5f5",
+    fontWeight: "bold",
+    textTransform: "uppercase"
   }
 });

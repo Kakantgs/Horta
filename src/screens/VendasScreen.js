@@ -1,13 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import DatePickerField from "../components/DatePickerField";
-import * as Print from "expo-print";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TextInput,
-  Modal,
   Alert,
   TouchableOpacity
 } from "react-native";
@@ -18,22 +16,11 @@ import {
   listarPedidosVenda,
   listarItensPedido
 } from "../services/vendaService";
-import {
-  listarLotesComerciais,
-  buscarLoteComercialComOrigem
-} from "../services/loteComercialService";
-import {
-  montarDadosEtiqueta,
-  gerarPdfEtiqueta,
-  compartilharPdfEtiqueta,
-  gerarHtmlEtiqueta
-} from "../services/etiquetaService";
 import { validarDataISO } from "../services/entradaService";
 import OptionSelectField from "../components/OptionSelectField";
 import SelectCardList from "../components/SelectCardList";
 
 const PAGE_SIZE_LOTES_VENDA = 20;
-const PAGE_SIZE_ETIQUETAS = 20;
 
 function ActionButton({ title, onPress, disabled = false, variant = "primary" }) {
   return (
@@ -81,6 +68,10 @@ function formatarDataBR(dataISO) {
   return `${dia}/${mes}/${ano}`;
 }
 
+function formatarPrecoInput(valor) {
+  return Number(valor || 0).toFixed(2).replace(".", ",");
+}
+
 function obterNivelSaldoComercial(lote) {
   const disponivel = Number(lote?.quantidade_disponivel || 0);
   const inicial = Number(lote?.quantidade_inicial || 0);
@@ -105,7 +96,6 @@ function obterNivelSaldoComercial(lote) {
 export default function VendasScreen() {
   const [clientes, setClientes] = useState([]);
   const [lotesComerciais, setLotesComerciais] = useState([]);
-  const [todosLotesComerciais, setTodosLotesComerciais] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [itensPedido, setItensPedido] = useState([]);
 
@@ -121,12 +111,7 @@ export default function VendasScreen() {
   const [precoUnitario, setPrecoUnitario] = useState("");
   const [dataVenda, setDataVenda] = useState("");
 
-  const [loteEtiquetaSelecionado, setLoteEtiquetaSelecionado] = useState(null);
-  const [origemLote, setOrigemLote] = useState(null);
-  const [modalEtiquetaVisible, setModalEtiquetaVisible] = useState(false);
-
   const [visibleLotesVendaCount, setVisibleLotesVendaCount] = useState(PAGE_SIZE_LOTES_VENDA);
-  const [visibleEtiquetasCount, setVisibleEtiquetasCount] = useState(PAGE_SIZE_ETIQUETAS);
 
   const OPCOES_STATUS_LOTE = [
     { label: "Todos", value: "" },
@@ -153,21 +138,18 @@ export default function VendasScreen() {
 
   async function carregarTudo() {
     try {
-      const [listaClientes, listaLotes, listaTodosLotes, listaPedidos, listaItens] =
+      const [listaClientes, listaLotes, listaPedidos, listaItens] =
         await Promise.all([
           listarClientes(),
           listarLotesComerciaisDisponiveis(),
-          listarLotesComerciais(),
           listarPedidosVenda(),
           listarItensPedido()
         ]);
 
       setClientes(listaClientes);
       setLotesComerciais(listaLotes);
-      setTodosLotesComerciais(listaTodosLotes);
       setPedidos(listaPedidos);
       setItensPedido(listaItens);
-      setVisibleEtiquetasCount(PAGE_SIZE_ETIQUETAS);
     } catch (error) {
       Alert.alert("Erro", error.message);
     }
@@ -178,6 +160,23 @@ export default function VendasScreen() {
 
   const loteSelecionado =
     lotesComerciais.find((item) => item.id === loteSelecionadoId) || null;
+
+  const clienteUsaPrecoPadrao =
+    Boolean(clienteSelecionado?.usa_preco_padrao) &&
+    Number(clienteSelecionado?.preco_padrao || 0) > 0;
+
+  useEffect(() => {
+    if (!clienteSelecionadoId) {
+      setPrecoUnitario("");
+      return;
+    }
+
+    if (clienteUsaPrecoPadrao) {
+      setPrecoUnitario(formatarPrecoInput(clienteSelecionado.preco_padrao));
+    } else {
+      setPrecoUnitario("");
+    }
+  }, [clienteSelecionadoId, clienteUsaPrecoPadrao, clienteSelecionado?.preco_padrao]);
 
   const quantidadeNumero = parseNumeroInteiro(quantidade);
   const precoUnitarioNumero = parseNumeroDecimal(precoUnitario);
@@ -269,16 +268,6 @@ export default function VendasScreen() {
     return lotesComerciaisFiltrados.slice(0, visibleLotesVendaCount);
   }, [lotesComerciaisFiltrados, visibleLotesVendaCount]);
 
-  const todosLotesComerciaisOrdenados = useMemo(() => {
-    return [...todosLotesComerciais].sort((a, b) =>
-      (b.data_formacao || "").localeCompare(a.data_formacao || "")
-    );
-  }, [todosLotesComerciais]);
-
-  const lotesEtiquetaVisiveis = useMemo(() => {
-    return todosLotesComerciaisOrdenados.slice(0, visibleEtiquetasCount);
-  }, [todosLotesComerciaisOrdenados, visibleEtiquetasCount]);
-
   const mensagemBloqueioVenda = useMemo(() => {
     if (!clienteSelecionadoId) return "Selecione um cliente.";
     if (!loteSelecionadoId) return "Selecione um lote comercial.";
@@ -351,7 +340,11 @@ export default function VendasScreen() {
 
       setLoteSelecionadoId("");
       setQuantidade("");
-      setPrecoUnitario("");
+      setPrecoUnitario(
+        clienteUsaPrecoPadrao
+          ? formatarPrecoInput(clienteSelecionado.preco_padrao)
+          : ""
+      );
 
       await carregarTudo();
     } catch (error) {
@@ -359,77 +352,11 @@ export default function VendasScreen() {
     }
   }
 
-  async function abrirModalEtiqueta(lote) {
-    try {
-      setLoteEtiquetaSelecionado(lote);
-
-      const origem = await buscarLoteComercialComOrigem(lote.id);
-      setOrigemLote(origem);
-
-      setModalEtiquetaVisible(true);
-    } catch (error) {
-      Alert.alert("Erro", error.message);
-    }
-  }
-
-  async function montarDadosEtiquetaAtual() {
-    if (!loteEtiquetaSelecionado) {
-      throw new Error("Nenhum lote comercial selecionado.");
-    }
-
-    return montarDadosEtiqueta({
-      loteComercialId: loteEtiquetaSelecionado.id,
-      produtorNome: "",
-      produtorCnpj: "",
-      origemTexto: "",
-      origemPadrao: "",
-      dataEmbalagem: loteEtiquetaSelecionado.data_formacao || "",
-      qrBaseUrl: "",
-      sistemaCultivo: "Hidropônico",
-      localProducao: "",
-      destino: "",
-      certificacoes: "",
-      insumosUtilizados: "",
-      layoutEtiqueta: "100x150"
-    });
-  }
-
-  async function handleGerarPdf() {
-    try {
-      const dados = await montarDadosEtiquetaAtual();
-      const resultado = await gerarPdfEtiqueta(dados);
-
-      Alert.alert("PDF gerado com sucesso", `Arquivo: ${resultado.uri}`);
-    } catch (error) {
-      Alert.alert("Erro ao gerar PDF", error.message);
-    }
-  }
-
-  async function handleCompartilharPdf() {
-    try {
-      const dados = await montarDadosEtiquetaAtual();
-      await compartilharPdfEtiqueta(dados);
-    } catch (error) {
-      Alert.alert("Erro ao compartilhar PDF", error.message);
-    }
-  }
-
-  async function handleImprimir() {
-    try {
-      const dados = await montarDadosEtiquetaAtual();
-      const html = gerarHtmlEtiqueta(dados);
-
-      await Print.printAsync({ html });
-    } catch (error) {
-      Alert.alert("Erro ao imprimir etiqueta", error.message);
-    }
-  }
-
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.titulo}>Vendas / Checkout</Text>
       <Text style={styles.subtitulo}>
-        Registre a saída comercial e gere a etiqueta dos lotes.
+        Registre a saída comercial do lote.
       </Text>
 
       <Text style={styles.secao}>Cliente</Text>
@@ -449,7 +376,13 @@ export default function VendasScreen() {
         onSelect={setClienteSelecionadoId}
         emptyMessage="Nenhum cliente encontrado."
         getTitle={(item) => item.nome}
-        getSubtitle={(item) => item.tipo_cliente || "Sem tipo"}
+        getSubtitle={(item) =>
+          `${item.tipo_cliente || "Sem tipo"}${
+            item.usa_preco_padrao
+              ? ` | Preço padrão: ${formatarMoeda(item.preco_padrao || 0)}`
+              : ""
+          }`
+        }
       />
 
       {clienteSelecionado && (
@@ -457,6 +390,12 @@ export default function VendasScreen() {
           <Text style={styles.cardTitulo}>Cliente selecionado</Text>
           <Text>{clienteSelecionado.nome}</Text>
           <Text>{clienteSelecionado.tipo_cliente || "Sem tipo"}</Text>
+          <Text>
+            Usa preço padrão: {clienteUsaPrecoPadrao ? "Sim" : "Não"}
+          </Text>
+          <Text>
+            Preço padrão: {clienteUsaPrecoPadrao ? formatarMoeda(clienteSelecionado.preco_padrao || 0) : "-"}
+          </Text>
         </View>
       )}
 
@@ -561,6 +500,12 @@ export default function VendasScreen() {
         placeholder="2,50"
       />
 
+      {clienteUsaPrecoPadrao ? (
+        <Text style={styles.feedbackInfo}>
+          Preço padrão do cliente aplicado automaticamente. Você ainda pode editar manualmente.
+        </Text>
+      ) : null}
+
       <DatePickerField
         label="Data da venda"
         value={dataVenda}
@@ -594,42 +539,6 @@ export default function VendasScreen() {
         disabled={!podeRegistrarVenda}
       />
 
-      <Text style={styles.secao}>Etiquetas / lotes comerciais</Text>
-
-      <Text style={styles.contadorLista}>
-        Mostrando {lotesEtiquetaVisiveis.length} de {todosLotesComerciaisOrdenados.length} lote(s) comerciais.
-      </Text>
-
-      {lotesEtiquetaVisiveis.length === 0 ? (
-        <Text style={styles.aviso}>Nenhum lote comercial gerado ainda.</Text>
-      ) : (
-        lotesEtiquetaVisiveis.map((item) => (
-          <View key={item.id} style={styles.card}>
-            <Text style={styles.cardTitulo}>{item.codigo_lote_comercial}</Text>
-            <Text>Data de formação: {formatarDataBR(item.data_formacao)}</Text>
-            <Text>Quantidade inicial: {item.quantidade_inicial}</Text>
-            <Text>Quantidade disponível: {item.quantidade_disponivel}</Text>
-            <Text>Status: {item.status}</Text>
-
-            <View style={{ marginTop: 10 }}>
-              <ActionButton
-                title="ABRIR OPÇÕES DE ETIQUETA"
-                onPress={() => abrirModalEtiqueta(item)}
-              />
-            </View>
-          </View>
-        ))
-      )}
-
-      {lotesEtiquetaVisiveis.length < todosLotesComerciaisOrdenados.length && (
-        <ActionButton
-          title={`CARREGAR MAIS ETIQUETAS (+${PAGE_SIZE_ETIQUETAS})`}
-          onPress={() =>
-            setVisibleEtiquetasCount((prev) => prev + PAGE_SIZE_ETIQUETAS)
-          }
-        />
-      )}
-
       <Text style={styles.secao}>Pedidos registrados</Text>
       {pedidos.length === 0 ? (
         <Text style={styles.aviso}>Nenhum pedido registrado ainda.</Text>
@@ -656,45 +565,6 @@ export default function VendasScreen() {
           </View>
         ))
       )}
-
-      <Modal visible={modalEtiquetaVisible} transparent animationType="slide">
-        <View style={styles.overlay}>
-          <View style={styles.modal}>
-            <Text style={styles.modalTitulo}>Etiqueta / PDF</Text>
-
-            <Text>Lote comercial: {loteEtiquetaSelecionado?.codigo_lote_comercial}</Text>
-            <Text>Data: {formatarDataBR(loteEtiquetaSelecionado?.data_formacao)}</Text>
-            <Text>Quantidade disponível: {loteEtiquetaSelecionado?.quantidade_disponivel}</Text>
-            <Text>Status: {loteEtiquetaSelecionado?.status}</Text>
-
-            <View style={{ height: 12 }} />
-
-            <Text style={styles.modalSubtitulo}>Origem</Text>
-            <Text>Lote produção: {origemLote?.loteProducao?.codigo_lote || "-"}</Text>
-            <Text>
-              Variedade: {origemLote?.variedade?.nome || origemLote?.loteProducao?.variedade_nome || "-"}
-            </Text>
-            <Text>Fornecedor: {origemLote?.fornecedor?.nome || "-"}</Text>
-            <Text>Entrada: {formatarDataBR(origemLote?.entrada?.data_entrada || "-")}</Text>
-            <Text>Data colheita: {formatarDataBR(origemLote?.colheita?.data_colheita || "-")}</Text>
-
-            <View style={{ height: 12 }} />
-            <ActionButton title="GERAR PDF" onPress={handleGerarPdf} />
-
-            <View style={{ height: 10 }} />
-            <ActionButton title="COMPARTILHAR PDF" onPress={handleCompartilharPdf} />
-
-            <View style={{ height: 10 }} />
-            <ActionButton title="IMPRIMIR ETIQUETA" onPress={handleImprimir} />
-
-            <View style={{ height: 10 }} />
-            <ActionButton
-              title="FECHAR"
-              onPress={() => setModalEtiquetaVisible(false)}
-            />
-          </View>
-        </View>
-      </Modal>
     </ScrollView>
   );
 }
@@ -798,26 +668,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     fontWeight: "600"
   },
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    justifyContent: "center",
-    padding: 16
-  },
-  modal: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 20
-  },
-  modalTitulo: {
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 12
-  },
-  modalSubtitulo: {
-    fontSize: 16,
-    fontWeight: "bold",
-    marginBottom: 8
+  feedbackInfo: {
+    color: "#1565c0",
+    marginBottom: 10,
+    fontWeight: "600"
   },
   actionButton: {
     backgroundColor: "#2196F3",
