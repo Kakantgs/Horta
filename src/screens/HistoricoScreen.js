@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Button,
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View
 } from "react-native";
+import SelectCardList from "../components/SelectCardList";
 import {
   buscarAuditoriaCompletaPorLote,
   listarLotesParaAuditoria
@@ -22,6 +23,50 @@ import {
   gerarPdfAuditoriaPorLote
 } from "../services/relatorioAuditoriaService";
 
+const PAGE_SIZE_LOTES = 20;
+
+function ActionButton({ title, onPress, disabled = false, variant = "primary" }) {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.actionButton,
+        variant === "danger" && styles.actionButtonDanger,
+        variant === "secondary" && styles.actionButtonSecondary,
+        disabled && styles.actionButtonDisabled
+      ]}
+      onPress={onPress}
+      activeOpacity={disabled ? 1 : 0.8}
+      disabled={disabled}
+    >
+      <Text
+        style={[
+          styles.actionButtonText,
+          disabled && styles.actionButtonTextDisabled
+        ]}
+      >
+        {title}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+function SectionToggle({ title, count = 0, isOpen, onToggle }) {
+  return (
+    <TouchableOpacity style={styles.sectionToggle} onPress={onToggle}>
+      <Text style={styles.sectionToggleTitle}>
+        {title} {count > 0 ? `(${count})` : ""}
+      </Text>
+      <Text style={styles.sectionToggleArrow}>{isOpen ? "▲" : "▼"}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function formatarDataBR(dataISO) {
+  if (!dataISO || !String(dataISO).includes("-")) return dataISO || "-";
+  const [ano, mes, dia] = String(dataISO).split("-");
+  return `${dia}/${mes}/${ano}`;
+}
+
 export default function HistoricoScreen() {
   const [lotes, setLotes] = useState([]);
   const [busca, setBusca] = useState("");
@@ -29,17 +74,33 @@ export default function HistoricoScreen() {
   const [auditoria, setAuditoria] = useState(null);
   const [carregando, setCarregando] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
+  const [visibleLotesCount, setVisibleLotesCount] = useState(PAGE_SIZE_LOTES);
+
+  const [secoesAbertas, setSecoesAbertas] = useState({
+    timeline: true,
+    ocupacoes: true,
+    movimentacoes: false,
+    monitoramentos: false,
+    ocorrencias: false,
+    colheitas: false,
+    lotesComerciais: false,
+    vendas: false
+  });
 
   useEffect(() => {
     carregarLotes();
   }, []);
+
+  useEffect(() => {
+    setVisibleLotesCount(PAGE_SIZE_LOTES);
+  }, [busca]);
 
   async function carregarLotes() {
     try {
       const lista = await listarLotesParaAuditoria();
       setLotes(lista);
     } catch (error) {
-      alert(error.message);
+      Alert.alert("Erro", error.message);
     }
   }
 
@@ -51,7 +112,7 @@ export default function HistoricoScreen() {
       const resultado = await buscarAuditoriaCompletaPorLote(loteId);
       setAuditoria(resultado);
     } catch (error) {
-      alert(error.message);
+      Alert.alert("Erro", error.message);
     } finally {
       setCarregando(false);
     }
@@ -65,16 +126,16 @@ export default function HistoricoScreen() {
   async function handleGerarPdf() {
     try {
       if (!loteSelecionadoId) {
-        alert("Selecione um lote primeiro.");
+        Alert.alert("Validação", "Selecione um lote primeiro.");
         return;
       }
 
       setGerandoPdf(true);
 
       const resultado = await gerarPdfAuditoriaPorLote(loteSelecionadoId);
-      alert(`PDF gerado com sucesso!\nArquivo: ${resultado.uri}`);
+      Alert.alert("Sucesso", `PDF gerado com sucesso.\nArquivo: ${resultado.uri}`);
     } catch (error) {
-      alert(error.message);
+      Alert.alert("Erro", error.message);
     } finally {
       setGerandoPdf(false);
     }
@@ -83,7 +144,7 @@ export default function HistoricoScreen() {
   async function handleCompartilharPdf() {
     try {
       if (!loteSelecionadoId) {
-        alert("Selecione um lote primeiro.");
+        Alert.alert("Validação", "Selecione um lote primeiro.");
         return;
       }
 
@@ -92,10 +153,17 @@ export default function HistoricoScreen() {
       const resultado = await gerarPdfAuditoriaPorLote(loteSelecionadoId);
       await compartilharPdfAuditoria(resultado.uri);
     } catch (error) {
-      alert(error.message);
+      Alert.alert("Erro", error.message);
     } finally {
       setGerandoPdf(false);
     }
+  }
+
+  function toggleSecao(chave) {
+    setSecoesAbertas((prev) => ({
+      ...prev,
+      [chave]: !prev[chave]
+    }));
   }
 
   function obterStatusVisualAuditoriaOcupacao(item) {
@@ -138,6 +206,28 @@ export default function HistoricoScreen() {
     }
   }
 
+  function obterBadgeStatusLote(status) {
+    const valor = String(status || "").toLowerCase();
+
+    if (valor === "colhido" || valor === "vendido") {
+      return { text: status, variant: "neutral" };
+    }
+
+    if (valor === "ativo" || valor === "disponivel") {
+      return { text: status, variant: "success" };
+    }
+
+    if (valor === "parcial") {
+      return { text: status, variant: "warning" };
+    }
+
+    if (valor === "encerrada" || valor === "transplantado") {
+      return { text: status, variant: "info" };
+    }
+
+    return { text: status || "Sem status", variant: "neutral" };
+  }
+
   const lotesFiltrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     if (!termo) return lotes;
@@ -145,10 +235,15 @@ export default function HistoricoScreen() {
     return lotes.filter((item) => {
       return (
         (item.codigo_lote || "").toLowerCase().includes(termo) ||
-        (item.variedade_nome || "").toLowerCase().includes(termo)
+        (item.variedade_nome || "").toLowerCase().includes(termo) ||
+        (item.status || "").toLowerCase().includes(termo)
       );
     });
   }, [lotes, busca]);
+
+  const lotesVisiveis = useMemo(() => {
+    return lotesFiltrados.slice(0, visibleLotesCount);
+  }, [lotesFiltrados, visibleLotesCount]);
 
   const timeline = useMemo(() => {
     if (!auditoria) return [];
@@ -220,43 +315,54 @@ export default function HistoricoScreen() {
         placeholder="Ex: LOT-20260319... ou Crespa"
       />
 
-      <Text style={styles.subtitulo}>Lotes</Text>
-      {lotesFiltrados.map((item) => (
-        <TouchableOpacity
-          key={item.id}
-          style={[
-            styles.card,
-            loteSelecionadoId === item.id && styles.cardSelecionado
-          ]}
-          onPress={() => abrirAuditoria(item.id)}
-        >
-          <Text style={styles.cardTitulo}>{item.codigo_lote}</Text>
-          <Text>Variedade: {item.variedade_nome}</Text>
-          <Text>Data: {item.data_formacao}</Text>
-          <Text>Status: {item.status}</Text>
-        </TouchableOpacity>
-      ))}
+      <Text style={styles.contadorLista}>
+        Mostrando {lotesVisiveis.length} de {lotesFiltrados.length} lote(s)
+      </Text>
 
-      {carregando && <Text style={styles.aviso}>Carregando auditoria...</Text>}
+      <SelectCardList
+        title="Lotes"
+        items={lotesVisiveis}
+        selectedId={loteSelecionadoId}
+        onSelect={abrirAuditoria}
+        emptyMessage="Nenhum lote encontrado."
+        getTitle={(item) => item.codigo_lote}
+        getSubtitle={(item) =>
+          `${item.variedade_nome || "-"} | Formação: ${formatarDataBR(item.data_formacao)}`
+        }
+        getMeta={(item) =>
+          `Status: ${item.status || "-"} | Quantidade inicial: ${item.quantidade_inicial || 0}`
+        }
+        getBadgeText={(item) => obterBadgeStatusLote(item.status).text}
+        getBadgeVariant={(item) => obterBadgeStatusLote(item.status).variant}
+      />
 
-      {auditoria && (
+      {lotesVisiveis.length < lotesFiltrados.length ? (
+        <ActionButton
+          title={`CARREGAR MAIS LOTES (+${PAGE_SIZE_LOTES})`}
+          onPress={() => setVisibleLotesCount((prev) => prev + PAGE_SIZE_LOTES)}
+        />
+      ) : null}
+
+      {carregando ? <Text style={styles.aviso}>Carregando auditoria...</Text> : null}
+
+      {auditoria ? (
         <>
           <View style={styles.linhaBotoes}>
             <View style={styles.botaoAcao}>
-              <Button title="Limpar seleção" onPress={limparSelecao} />
+              <ActionButton title="LIMPAR SELEÇÃO" onPress={limparSelecao} />
             </View>
 
             <View style={styles.botaoAcao}>
-              <Button
-                title={gerandoPdf ? "Gerando PDF..." : "Gerar PDF"}
+              <ActionButton
+                title={gerandoPdf ? "GERANDO PDF..." : "GERAR PDF"}
                 onPress={handleGerarPdf}
                 disabled={gerandoPdf}
               />
             </View>
 
             <View style={styles.botaoAcao}>
-              <Button
-                title={gerandoPdf ? "Compartilhando..." : "Compartilhar PDF"}
+              <ActionButton
+                title={gerandoPdf ? "COMPARTILHANDO..." : "COMPARTILHAR PDF"}
                 onPress={handleCompartilharPdf}
                 disabled={gerandoPdf}
               />
@@ -267,7 +373,7 @@ export default function HistoricoScreen() {
           <View style={styles.cardDestaque}>
             <Text style={styles.cardTitulo}>{auditoria.lote.codigo_lote}</Text>
             <Text>Variedade: {auditoria.lote.variedade_nome}</Text>
-            <Text>Data formação: {auditoria.lote.data_formacao}</Text>
+            <Text>Data formação: {formatarDataBR(auditoria.lote.data_formacao)}</Text>
             <Text>Quantidade inicial: {auditoria.lote.quantidade_inicial}</Text>
             <Text>
               Saldo disponível para ocupar:{" "}
@@ -277,173 +383,224 @@ export default function HistoricoScreen() {
             <Text>Status: {auditoria.lote.status}</Text>
             <Text>Entrada: {auditoria.entrada?.id || "-"}</Text>
             <Text>Fornecedor: {auditoria.fornecedor?.nome || "-"}</Text>
-            <Text>Data entrada: {auditoria.entrada?.data_entrada || "-"}</Text>
+            <Text>Data entrada: {formatarDataBR(auditoria.entrada?.data_entrada || "-")}</Text>
             <Text>Lote fornecedor: {auditoria.entrada?.lote_fornecedor || "-"}</Text>
           </View>
 
-          <Text style={styles.subtitulo}>Linha do tempo</Text>
-          {timeline.length === 0 ? (
-            <Text style={styles.aviso}>Nenhum evento encontrado.</Text>
-          ) : (
-            timeline.map((item) => (
-              <View key={item.id} style={styles.card}>
-                <Text style={styles.cardTitulo}>{item.titulo}</Text>
-                <Text>Data: {item.data || "-"}</Text>
-                <Text>Tipo: {item.tipo}</Text>
-                <Text>{item.detalhe}</Text>
-              </View>
-            ))
-          )}
+          <SectionToggle
+            title="Linha do tempo"
+            count={timeline.length}
+            isOpen={secoesAbertas.timeline}
+            onToggle={() => toggleSecao("timeline")}
+          />
+          {secoesAbertas.timeline ? (
+            timeline.length === 0 ? (
+              <Text style={styles.aviso}>Nenhum evento encontrado.</Text>
+            ) : (
+              timeline.map((item) => (
+                <View key={item.id} style={styles.card}>
+                  <Text style={styles.cardTitulo}>{item.titulo}</Text>
+                  <Text>Data: {formatarDataBR(item.data || "-")}</Text>
+                  <Text>Tipo: {item.tipo}</Text>
+                  <Text>{item.detalhe}</Text>
+                </View>
+              ))
+            )
+          ) : null}
 
-          <Text style={styles.subtitulo}>Ocupações</Text>
-          {auditoria.ocupacoes.length === 0 ? (
-            <Text style={styles.aviso}>Nenhuma ocupação encontrada.</Text>
-          ) : (
-            auditoria.ocupacoes.map((item) => (
-              <View key={item.id} style={styles.card}>
-                <Text style={styles.cardTitulo}>{item.id}</Text>
-                <Text>Bancada: {item.bancada?.codigo || item.bancada_id}</Text>
-                <Text>Tipo bancada: {item.bancada?.tipo || "-"}</Text>
-                <Text>Setor: {item.setor?.codigo || "-"}</Text>
-                <Text>
-                  Faixa: {item.posicao_inicial} até {item.posicao_final}
-                </Text>
-                <Text>Quantidade: {item.quantidade_alocada}</Text>
-                <Text>Data início: {item.data_inicio}</Text>
-                <Text>Data fim: {item.data_fim || "-"}</Text>
-                <Text>Tipo ocupação: {item.tipo_ocupacao}</Text>
-                <Text>Status do banco: {item.status}</Text>
+          <SectionToggle
+            title="Ocupações"
+            count={auditoria.ocupacoes.length}
+            isOpen={secoesAbertas.ocupacoes}
+            onToggle={() => toggleSecao("ocupacoes")}
+          />
+          {secoesAbertas.ocupacoes ? (
+            auditoria.ocupacoes.length === 0 ? (
+              <Text style={styles.aviso}>Nenhuma ocupação encontrada.</Text>
+            ) : (
+              auditoria.ocupacoes.map((item) => {
+                const resumo = obterStatusVisualAuditoriaOcupacao(item);
 
-                {(() => {
-                  const resumo = obterStatusVisualAuditoriaOcupacao(item);
+                return (
+                  <View key={item.id} style={styles.card}>
+                    <Text style={styles.cardTitulo}>{item.id}</Text>
+                    <Text>Bancada: {item.bancada?.codigo || item.bancada_id}</Text>
+                    <Text>Tipo bancada: {item.bancada?.tipo || "-"}</Text>
+                    <Text>Setor: {item.setor?.codigo || "-"}</Text>
+                    <Text>
+                      Faixa: {item.posicao_inicial} até {item.posicao_final}
+                    </Text>
+                    <Text>Quantidade: {item.quantidade_alocada}</Text>
+                    <Text>Data início: {formatarDataBR(item.data_inicio)}</Text>
+                    <Text>Data fim: {formatarDataBR(item.data_fim || "-")}</Text>
+                    <Text>Tipo ocupação: {item.tipo_ocupacao}</Text>
+                    <Text>Status do banco: {item.status}</Text>
+                    <Text>Dias na ocupação: {resumo.diasOcupacao}</Text>
+                    <Text>Dias desde a entrada: {resumo.diasEntrada}</Text>
 
-                  return (
-                    <>
-                      <Text>Dias na ocupação: {resumo.diasOcupacao}</Text>
-                      <Text>Dias desde a entrada: {resumo.diasEntrada}</Text>
-
-                      <View
-                        style={[
-                          styles.badgeStatus,
-                          { backgroundColor: obterCorStatusVisual(resumo.statusVisual) }
-                        ]}
-                      >
-                        <Text style={styles.badgeStatusTexto}>{resumo.statusVisual}</Text>
-                      </View>
-                    </>
-                  );
-                })()}
-              </View>
-            ))
-          )}
-
-          <Text style={styles.subtitulo}>Movimentações</Text>
-          {auditoria.movimentacoes.length === 0 ? (
-            <Text style={styles.aviso}>Nenhuma movimentação encontrada.</Text>
-          ) : (
-            auditoria.movimentacoes.map((item) => (
-              <View key={item.id} style={styles.card}>
-                <Text style={styles.cardTitulo}>{item.id}</Text>
-                <Text>Tipo: {item.tipo_movimentacao}</Text>
-                <Text>Quantidade: {item.quantidade_movimentada}</Text>
-                <Text>Data: {item.data_movimentacao}</Text>
-                <Text>Bancada origem: {item.bancada_origem_id || "-"}</Text>
-                <Text>Bancada destino: {item.bancada_destino_id || "-"}</Text>
-                <Text>Ocupação origem: {item.ocupacao_origem_id || "-"}</Text>
-                <Text>Ocupação destino: {item.ocupacao_destino_id || "-"}</Text>
-              </View>
-            ))
-          )}
-
-          <Text style={styles.subtitulo}>Monitoramentos por setor</Text>
-          {auditoria.monitoramentos.length === 0 ? (
-            <Text style={styles.aviso}>Nenhum monitoramento encontrado.</Text>
-          ) : (
-            auditoria.monitoramentos.map((item) => (
-              <View key={item.id} style={styles.card}>
-                <Text style={styles.cardTitulo}>
-                  {item.data_hora_monitoramento || item.id}
-                </Text>
-                <Text>Setor: {item.setor_codigo || item.setor_id || "-"}</Text>
-                <Text>pH: {item.ph ?? "-"}</Text>
-                <Text>CE: {item.ce ?? "-"}</Text>
-                <Text>Temperatura: {item.temperatura_agua ?? "-"}</Text>
-                <Text>Obs.: {item.observacoes || "-"}</Text>
-              </View>
-            ))
-          )}
-
-          <Text style={styles.subtitulo}>Ocorrências por setor</Text>
-          {auditoria.ocorrencias.length === 0 ? (
-            <Text style={styles.aviso}>Nenhuma ocorrência encontrada.</Text>
-          ) : (
-            auditoria.ocorrencias.map((item) => (
-              <View key={item.id} style={styles.card}>
-                <Text style={styles.cardTitulo}>{item.tipo_ocorrencia || item.id}</Text>
-                <Text>Setor: {item.setor_codigo || item.setor_id || "-"}</Text>
-                <Text>Descrição: {item.descricao || "-"}</Text>
-                <Text>Ação corretiva: {item.acao_corretiva || "-"}</Text>
-                <Text>Data/hora: {item.data_hora_ocorrencia || "-"}</Text>
-                <Text>Status: {item.status || "-"}</Text>
-              </View>
-            ))
-          )}
-
-          <Text style={styles.subtitulo}>Colheitas</Text>
-          {auditoria.colheitas.length === 0 ? (
-            <Text style={styles.aviso}>Nenhuma colheita encontrada.</Text>
-          ) : (
-            auditoria.colheitas.map((item) => (
-              <View key={item.id} style={styles.card}>
-                <Text style={styles.cardTitulo}>{item.id}</Text>
-                <Text>Data colheita: {item.data_colheita}</Text>
-                <Text>Ocupação: {item.ocupacao_bancada_id}</Text>
-                <Text>Quantidade colhida: {item.quantidade_colhida}</Text>
-                <Text>Quantidade perda: {item.quantidade_perda}</Text>
-                <Text>Tipo: {item.tipo_colheita}</Text>
-              </View>
-            ))
-          )}
-
-          <Text style={styles.subtitulo}>Lotes comerciais</Text>
-          {auditoria.lotes_comerciais.length === 0 ? (
-            <Text style={styles.aviso}>Nenhum lote comercial encontrado.</Text>
-          ) : (
-            auditoria.lotes_comerciais.map((item) => (
-              <View key={item.id} style={styles.card}>
-                <Text style={styles.cardTitulo}>{item.codigo_lote_comercial}</Text>
-                <Text>Data formação: {item.data_formacao}</Text>
-                <Text>Quantidade inicial: {item.quantidade_inicial}</Text>
-                <Text>Quantidade disponível: {item.quantidade_disponivel}</Text>
-                <Text>Status: {item.status}</Text>
-              </View>
-            ))
-          )}
-
-          <Text style={styles.subtitulo}>Vendas</Text>
-          {auditoria.pedidos.length === 0 ? (
-            <Text style={styles.aviso}>Nenhuma venda encontrada.</Text>
-          ) : (
-            auditoria.pedidos.map((pedido) => (
-              <View key={pedido.id} style={styles.card}>
-                <Text style={styles.cardTitulo}>{pedido.id}</Text>
-                <Text>Cliente: {pedido.cliente?.nome || pedido.cliente_nome || "-"}</Text>
-                <Text>Data venda: {pedido.data_venda}</Text>
-                <Text>Status: {pedido.status}</Text>
-
-                <Text style={styles.subItemTitulo}>Itens</Text>
-                {pedido.itens.map((item) => (
-                  <View key={item.id} style={styles.itemBox}>
-                    <Text>Lote comercial: {item.codigo_lote_comercial}</Text>
-                    <Text>Quantidade: {item.quantidade}</Text>
-                    <Text>Preço unitário: {item.preco_unitario}</Text>
+                    <View
+                      style={[
+                        styles.badgeStatus,
+                        { backgroundColor: obterCorStatusVisual(resumo.statusVisual) }
+                      ]}
+                    >
+                      <Text style={styles.badgeStatusTexto}>{resumo.statusVisual}</Text>
+                    </View>
                   </View>
-                ))}
-              </View>
-            ))
-          )}
+                );
+              })
+            )
+          ) : null}
+
+          <SectionToggle
+            title="Movimentações"
+            count={auditoria.movimentacoes.length}
+            isOpen={secoesAbertas.movimentacoes}
+            onToggle={() => toggleSecao("movimentacoes")}
+          />
+          {secoesAbertas.movimentacoes ? (
+            auditoria.movimentacoes.length === 0 ? (
+              <Text style={styles.aviso}>Nenhuma movimentação encontrada.</Text>
+            ) : (
+              auditoria.movimentacoes.map((item) => (
+                <View key={item.id} style={styles.card}>
+                  <Text style={styles.cardTitulo}>{item.id}</Text>
+                  <Text>Tipo: {item.tipo_movimentacao}</Text>
+                  <Text>Quantidade: {item.quantidade_movimentada}</Text>
+                  <Text>Data: {formatarDataBR(item.data_movimentacao)}</Text>
+                  <Text>Bancada origem: {item.bancada_origem_id || "-"}</Text>
+                  <Text>Bancada destino: {item.bancada_destino_id || "-"}</Text>
+                  <Text>Ocupação origem: {item.ocupacao_origem_id || "-"}</Text>
+                  <Text>Ocupação destino: {item.ocupacao_destino_id || "-"}</Text>
+                </View>
+              ))
+            )
+          ) : null}
+
+          <SectionToggle
+            title="Monitoramentos por setor"
+            count={auditoria.monitoramentos.length}
+            isOpen={secoesAbertas.monitoramentos}
+            onToggle={() => toggleSecao("monitoramentos")}
+          />
+          {secoesAbertas.monitoramentos ? (
+            auditoria.monitoramentos.length === 0 ? (
+              <Text style={styles.aviso}>Nenhum monitoramento encontrado.</Text>
+            ) : (
+              auditoria.monitoramentos.map((item) => (
+                <View key={item.id} style={styles.card}>
+                  <Text style={styles.cardTitulo}>
+                    {item.data_hora_monitoramento || item.id}
+                  </Text>
+                  <Text>Setor: {item.setor_codigo || item.setor_id || "-"}</Text>
+                  <Text>pH: {item.ph ?? "-"}</Text>
+                  <Text>CE: {item.ce ?? "-"}</Text>
+                  <Text>Temperatura: {item.temperatura_agua ?? "-"}</Text>
+                  <Text>Obs.: {item.observacoes || "-"}</Text>
+                </View>
+              ))
+            )
+          ) : null}
+
+          <SectionToggle
+            title="Ocorrências por setor"
+            count={auditoria.ocorrencias.length}
+            isOpen={secoesAbertas.ocorrencias}
+            onToggle={() => toggleSecao("ocorrencias")}
+          />
+          {secoesAbertas.ocorrencias ? (
+            auditoria.ocorrencias.length === 0 ? (
+              <Text style={styles.aviso}>Nenhuma ocorrência encontrada.</Text>
+            ) : (
+              auditoria.ocorrencias.map((item) => (
+                <View key={item.id} style={styles.card}>
+                  <Text style={styles.cardTitulo}>{item.tipo_ocorrencia || item.id}</Text>
+                  <Text>Setor: {item.setor_codigo || item.setor_id || "-"}</Text>
+                  <Text>Descrição: {item.descricao || "-"}</Text>
+                  <Text>Ação corretiva: {item.acao_corretiva || "-"}</Text>
+                  <Text>Data/hora: {item.data_hora_ocorrencia || "-"}</Text>
+                  <Text>Status: {item.status || "-"}</Text>
+                </View>
+              ))
+            )
+          ) : null}
+
+          <SectionToggle
+            title="Colheitas"
+            count={auditoria.colheitas.length}
+            isOpen={secoesAbertas.colheitas}
+            onToggle={() => toggleSecao("colheitas")}
+          />
+          {secoesAbertas.colheitas ? (
+            auditoria.colheitas.length === 0 ? (
+              <Text style={styles.aviso}>Nenhuma colheita encontrada.</Text>
+            ) : (
+              auditoria.colheitas.map((item) => (
+                <View key={item.id} style={styles.card}>
+                  <Text style={styles.cardTitulo}>{item.id}</Text>
+                  <Text>Data colheita: {formatarDataBR(item.data_colheita)}</Text>
+                  <Text>Ocupação: {item.ocupacao_bancada_id}</Text>
+                  <Text>Quantidade colhida: {item.quantidade_colhida}</Text>
+                  <Text>Quantidade perda: {item.quantidade_perda}</Text>
+                  <Text>Tipo: {item.tipo_colheita}</Text>
+                </View>
+              ))
+            )
+          ) : null}
+
+          <SectionToggle
+            title="Lotes comerciais"
+            count={auditoria.lotes_comerciais.length}
+            isOpen={secoesAbertas.lotesComerciais}
+            onToggle={() => toggleSecao("lotesComerciais")}
+          />
+          {secoesAbertas.lotesComerciais ? (
+            auditoria.lotes_comerciais.length === 0 ? (
+              <Text style={styles.aviso}>Nenhum lote comercial encontrado.</Text>
+            ) : (
+              auditoria.lotes_comerciais.map((item) => (
+                <View key={item.id} style={styles.card}>
+                  <Text style={styles.cardTitulo}>{item.codigo_lote_comercial}</Text>
+                  <Text>Data formação: {formatarDataBR(item.data_formacao)}</Text>
+                  <Text>Quantidade inicial: {item.quantidade_inicial}</Text>
+                  <Text>Quantidade disponível: {item.quantidade_disponivel}</Text>
+                  <Text>Status: {item.status}</Text>
+                </View>
+              ))
+            )
+          ) : null}
+
+          <SectionToggle
+            title="Vendas"
+            count={auditoria.pedidos.length}
+            isOpen={secoesAbertas.vendas}
+            onToggle={() => toggleSecao("vendas")}
+          />
+          {secoesAbertas.vendas ? (
+            auditoria.pedidos.length === 0 ? (
+              <Text style={styles.aviso}>Nenhuma venda encontrada.</Text>
+            ) : (
+              auditoria.pedidos.map((pedido) => (
+                <View key={pedido.id} style={styles.card}>
+                  <Text style={styles.cardTitulo}>{pedido.id}</Text>
+                  <Text>Cliente: {pedido.cliente?.nome || pedido.cliente_nome || "-"}</Text>
+                  <Text>Data venda: {formatarDataBR(pedido.data_venda)}</Text>
+                  <Text>Status: {pedido.status}</Text>
+
+                  <Text style={styles.subItemTitulo}>Itens</Text>
+                  {pedido.itens.map((item) => (
+                    <View key={item.id} style={styles.itemBox}>
+                      <Text>Lote comercial: {item.codigo_lote_comercial}</Text>
+                      <Text>Quantidade: {item.quantidade}</Text>
+                      <Text>Preço unitário: {item.preco_unitario}</Text>
+                    </View>
+                  ))}
+                </View>
+              ))
+            )
+          ) : null}
         </>
-      )}
+      ) : null}
     </ScrollView>
   );
 }
@@ -469,6 +626,11 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     marginBottom: 6
   },
+  contadorLista: {
+    color: "#555",
+    marginBottom: 8,
+    fontWeight: "600"
+  },
   input: {
     borderWidth: 1,
     borderColor: "#999",
@@ -486,10 +648,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     marginBottom: 10
-  },
-  cardSelecionado: {
-    borderColor: "#2e86de",
-    backgroundColor: "#eaf3ff"
   },
   cardDestaque: {
     borderWidth: 1,
@@ -528,12 +686,59 @@ const styles = StyleSheet.create({
     fontSize: 12
   },
   linhaBotoes: {
-    flexDirection: "row",
-    flexWrap: "wrap",
     marginBottom: 12
   },
   botaoAcao: {
-    marginRight: 10,
     marginBottom: 8
+  },
+  sectionToggle: {
+    borderWidth: 1,
+    borderColor: "#d0d7de",
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    backgroundColor: "#f8fafc",
+    marginTop: 10,
+    marginBottom: 8,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center"
+  },
+  sectionToggleTitle: {
+    fontWeight: "bold",
+    fontSize: 15
+  },
+  sectionToggleArrow: {
+    fontWeight: "bold",
+    fontSize: 14,
+    color: "#555"
+  },
+  actionButton: {
+    backgroundColor: "#2196F3",
+    borderRadius: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8
+  },
+  actionButtonSecondary: {
+    backgroundColor: "#1976d2"
+  },
+  actionButtonDanger: {
+    backgroundColor: "#d32f2f"
+  },
+  actionButtonDisabled: {
+    backgroundColor: "#9e9e9e"
+  },
+  actionButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    textTransform: "uppercase"
+  },
+  actionButtonTextDisabled: {
+    color: "#f5f5f5",
+    fontWeight: "bold",
+    textTransform: "uppercase"
   }
 });
