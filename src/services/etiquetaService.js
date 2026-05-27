@@ -2,6 +2,7 @@ import { get, ref } from "firebase/database";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import QRCode from "qrcode";
+import { Platform } from "react-native";
 import { db } from "../config/firebaseConfig";
 
 async function lerNo(caminho) {
@@ -73,9 +74,9 @@ function obterConfiguracaoLayout(layoutEtiqueta) {
       larguraMm: 80,
       alturaMm: 100,
       produtoFont: 22,
-      textoFont: 13,
-      loteFont: 18,
-      qrSize: 150,
+      textoFont: 12,
+      loteFont: 17,
+      qrSize: 118,
       padding: 12
     };
   }
@@ -86,9 +87,51 @@ function obterConfiguracaoLayout(layoutEtiqueta) {
     produtoFont: 26,
     textoFont: 15,
     loteFont: 22,
-    qrSize: 180,
+    qrSize: 145,
     padding: 16
   };
+}
+
+function montarUrlRastreio(qrBaseUrl, lote) {
+  const base = String(qrBaseUrl || "").trim();
+  if (!base) return "";
+
+  const separador = base.includes("?") ? "&" : "?";
+  return `${base}${separador}lote=${encodeURIComponent(lote)}`;
+}
+
+function linhaHtml(rotulo, valor) {
+  const texto = String(valor || "").trim();
+  if (!texto || texto === "-") return "";
+
+  return `<div class="linha"><strong>${escaparHtml(rotulo)}:</strong> ${escaparHtml(texto)}</div>`;
+}
+
+function imprimirHtmlNoNavegador(html) {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    throw new Error("Impressão web indisponível neste ambiente.");
+  }
+
+  const printWindow = window.open("", "_blank", "width=480,height=720");
+
+  if (!printWindow) {
+    throw new Error("O navegador bloqueou a janela de impressão. Permita pop-ups para gerar o PDF.");
+  }
+
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  printWindow.focus();
+
+  const imprimir = () => {
+    printWindow.print();
+  };
+
+  if (printWindow.document.readyState === "complete") {
+    setTimeout(imprimir, 250);
+  } else {
+    printWindow.onload = () => setTimeout(imprimir, 250);
+  }
 }
 
 export async function listarLotesComerciaisParaEtiqueta() {
@@ -204,7 +247,7 @@ export async function montarDadosEtiqueta({
     local_producao: origemCalculada || "Não informado",
     destino: destino || "",
     certificacoes: certificacoes || "",
-    url_rastreio: qrBaseUrl ? `${qrBaseUrl}?lote=${encodeURIComponent(lote)}` : ""
+    url_rastreio: montarUrlRastreio(qrBaseUrl, lote)
   };
 
   const qrTexto = qrPayload.url_rastreio || JSON.stringify(qrPayload, null, 2);
@@ -241,6 +284,8 @@ export async function montarDadosEtiqueta({
 
 export function gerarHtmlEtiqueta(dados) {
   const cfg = obterConfiguracaoLayout(dados.layoutEtiqueta);
+  const colheitaFormatada = formatarData(dados.dataColheita);
+  const embalagemFormatada = formatarData(dados.dataEmbalagem);
 
   return `
     <html>
@@ -256,19 +301,25 @@ export function gerarHtmlEtiqueta(dados) {
             margin: 0;
             font-family: Arial, sans-serif;
             color: #000;
+            background: #fff;
           }
 
           .pagina {
             width: ${cfg.larguraMm}mm;
-            min-height: ${cfg.alturaMm}mm;
+            height: ${cfg.alturaMm}mm;
             box-sizing: border-box;
             padding: ${cfg.padding}px;
+            overflow: hidden;
           }
 
           .etiqueta {
             border: 2px solid #000;
             padding: ${cfg.padding}px;
             box-sizing: border-box;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
           }
 
           .produto {
@@ -288,24 +339,37 @@ export function gerarHtmlEtiqueta(dados) {
           .lote {
             font-size: ${cfg.loteFont}px;
             font-weight: bold;
-            margin: 12px 0;
+            margin: 10px 0;
             line-height: 1.2;
+            text-align: center;
           }
 
           .qr {
             text-align: center;
-            margin-top: 16px;
+            margin-top: auto;
+            padding-top: 10px;
           }
 
           .qr img {
             width: ${cfg.qrSize}px;
             height: ${cfg.qrSize}px;
+            display: block;
+            margin: 0 auto;
+            object-fit: contain;
           }
 
           .rodape {
             text-align: center;
-            margin-top: 8px;
+            margin-top: 6px;
             font-size: ${Math.max(11, cfg.textoFont - 1)}px;
+          }
+
+          @media print {
+            html,
+            body {
+              width: ${cfg.larguraMm}mm;
+              height: ${cfg.alturaMm}mm;
+            }
           }
         </style>
       </head>
@@ -314,21 +378,21 @@ export function gerarHtmlEtiqueta(dados) {
           <div class="etiqueta">
             <div class="produto">${escaparHtml(dados.produto)}</div>
 
-            <div class="linha"><strong>Variedade:</strong> ${escaparHtml(dados.variedade)}</div>
-            <div class="linha"><strong>Produtor:</strong> ${escaparHtml(dados.produtorNome || "-")}</div>
-            <div class="linha"><strong>CNPJ:</strong> ${escaparHtml(dados.produtorCnpj || "-")}</div>
-            <div class="linha"><strong>Origem:</strong> ${escaparHtml(dados.origemTexto || "-")}</div>
+            ${linhaHtml("Variedade", dados.variedade)}
+            ${linhaHtml("Produtor", dados.produtorNome)}
+            ${linhaHtml("CNPJ", dados.produtorCnpj)}
+            ${linhaHtml("Origem", dados.origemTexto)}
 
             <div class="lote">Lote: ${escaparHtml(dados.lote)}</div>
 
-            <div class="linha"><strong>Colheita:</strong> ${formatarData(dados.dataColheita)}</div>
-            <div class="linha"><strong>Embalagem:</strong> ${formatarData(dados.dataEmbalagem)}</div>
+            ${linhaHtml("Colheita", colheitaFormatada)}
+            ${linhaHtml("Embalagem", embalagemFormatada)}
 
             <div class="qr">
               <img src="${dados.qrDataUrl}" />
             </div>
 
-            <div class="rodape">Rastreabilidade completa</div>
+            <div class="rodape">Rastreabilidade</div>
           </div>
         </div>
       </body>
@@ -338,6 +402,15 @@ export function gerarHtmlEtiqueta(dados) {
 
 export async function gerarPdfEtiqueta(dados) {
   const html = gerarHtmlEtiqueta(dados);
+
+  if (Platform.OS === "web") {
+    imprimirHtmlNoNavegador(html);
+
+    return {
+      uri: "Janela de impressão aberta no navegador",
+      html
+    };
+  }
 
   const resultado = await Print.printToFileAsync({
     html
@@ -350,6 +423,10 @@ export async function gerarPdfEtiqueta(dados) {
 }
 
 export async function compartilharPdfEtiqueta(dados) {
+  if (Platform.OS === "web") {
+    return gerarPdfEtiqueta(dados);
+  }
+
   const resultado = await gerarPdfEtiqueta(dados);
 
   const podeCompartilhar = await Sharing.isAvailableAsync();

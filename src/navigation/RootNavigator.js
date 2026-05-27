@@ -6,12 +6,12 @@ import AppTabs from "./AppTabs";
 import LoginScreen from "../screens/LoginScreen";
 import RegisterScreen from "../screens/RegisterScreen";
 import { useAuth } from "../contexts/AuthContext";
-import { View, ActivityIndicator } from "react-native";
+import { View, ActivityIndicator, Button, Text, ScrollView } from "react-native";
 
 const Stack = createNativeStackNavigator();
 
 export default function RootNavigator() {
-  const { user, loading } = useAuth();
+  const { user, profile, loading, logout } = useAuth();
 
   if (loading) {
     return (
@@ -23,8 +23,18 @@ export default function RootNavigator() {
 
   return (
     <NavigationContainer>
-      {user ? (
+      {user && profile ? (
         <AppTabs />
+      ) : user ? (
+        <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 24 }}>
+          <Text style={{ fontSize: 20, fontWeight: "bold", textAlign: "center", marginBottom: 12 }}>
+            Acesso pendente
+          </Text>
+          <Text style={{ textAlign: "center", marginBottom: 20 }}>
+            Sua conta ainda nao foi aprovada por um administrador.
+          </Text>
+          <Button title="Sair" onPress={logout} />
+        </ScrollView>
       ) : (
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Login" component={LoginScreen} />

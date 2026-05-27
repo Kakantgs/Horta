@@ -37,6 +37,10 @@ export async function atualizarFornecedor(id, dados) {
 
   if (payload.nome !== undefined) {
     payload.nome = (payload.nome || "").trim();
+
+    if (!payload.nome) {
+      throw new Error("Nome do fornecedor é obrigatório.");
+    }
   }
 
   if (payload.cnpj !== undefined) {
@@ -71,18 +75,6 @@ export async function excluirFornecedor(id) {
 }
 
 export async function inativarFornecedor(id) {
-  const entradasSnapshot = await get(ref(db, "entradas"));
-
-  const entradas = entradasSnapshot.exists()
-    ? Object.values(entradasSnapshot.val())
-    : [];
-
-  const existeEntrada = entradas.some((item) => item.fornecedor_id === id);
-
-  if (existeEntrada) {
-    throw new Error("Esse fornecedor possui histórico de entradas. Use inativação apenas se quiser manter o histórico.");
-  }
-
   await update(ref(db, `fornecedores/${id}`), {
     ativo: false
   });

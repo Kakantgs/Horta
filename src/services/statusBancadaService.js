@@ -36,7 +36,10 @@ export async function recalcularStatusBancada(bancadaId) {
     : [];
 
   const ocupacoesAtivas = ocupacoes.filter(
-    (ocp) => ocp.bancada_id === bancadaId && ocp.status === "ativa"
+    (ocp) =>
+      ocp.bancada_id === bancadaId &&
+      ocp.status === "ativa" &&
+      Number(ocp.quantidade_alocada || 0) > 0
   );
 
   const ocupacaoIdsAtivas = new Set(ocupacoesAtivas.map((ocp) => ocp.id));

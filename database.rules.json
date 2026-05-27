@@ -1,0 +1,16 @@
+{
+  "rules": {
+    ".read": "auth != null && root.child('users').child(auth.uid).exists()",
+    ".write": "auth != null && root.child('users').child(auth.uid).exists()",
+    "solicitacoes_acesso": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()",
+      ".write": true
+    },
+    "users": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid == $uid || root.child('users').child(auth.uid).exists())",
+        ".write": "auth != null && root.child('users').child(auth.uid).exists()"
+      }
+    }
+  }
+}

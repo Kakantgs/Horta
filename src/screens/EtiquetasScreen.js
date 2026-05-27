@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -402,7 +403,6 @@ export default function EtiquetasScreen({ onVoltar }) {
           <Text style={styles.subtitulo}>Preview textual</Text>
           <View style={styles.cardDestaque}>
             <Text style={styles.previewProduto}>{dadosEtiqueta.produto}</Text>
-            <Text>Layout: {dadosEtiqueta.layoutEtiqueta}</Text>
             <Text>Variedade: {dadosEtiqueta.variedade}</Text>
             <Text>Produtor: {dadosEtiqueta.produtorNome}</Text>
             <Text>CNPJ: {dadosEtiqueta.produtorCnpj || "-"}</Text>
@@ -416,6 +416,15 @@ export default function EtiquetasScreen({ onVoltar }) {
                 ? `${dadosEtiqueta.ultimaFinal.bancada.codigo}`
                 : "-"}
             </Text>
+            <View style={styles.previewQrBox}>
+              <Image
+                source={{ uri: dadosEtiqueta.qrDataUrl }}
+                style={styles.previewQr}
+              />
+              <Text style={styles.previewQrTexto}>
+                QR: {dadosEtiqueta.qrPayload?.url_rastreio || "Dados de rastreabilidade"}
+              </Text>
+            </View>
           </View>
         </>
       ) : null}
@@ -480,6 +489,23 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "bold",
     marginVertical: 10
+  },
+  previewQrBox: {
+    alignItems: "center",
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#b7d5e8"
+  },
+  previewQr: {
+    width: 150,
+    height: 150,
+    marginBottom: 8
+  },
+  previewQrTexto: {
+    color: "#333",
+    fontSize: 12,
+    textAlign: "center"
   },
   actionButton: {
     backgroundColor: "#2196F3",

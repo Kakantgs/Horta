@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import {
-  View,
   Text,
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert
+  Alert,
+  ScrollView
 } from "react-native";
 
 import { useAuth } from "../contexts/AuthContext";
@@ -30,7 +30,11 @@ export default function LoginScreen({ navigation }) {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+    >
 
       <Text style={styles.titulo}>Login</Text>
 
@@ -59,13 +63,16 @@ export default function LoginScreen({ navigation }) {
         </Text>
       </TouchableOpacity>
 
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  scroll: {
+    flex: 1
+  },
   container:{
-    flex:1,
+    flexGrow:1,
     justifyContent:"center",
     padding:20
   },

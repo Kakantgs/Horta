@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, Button, StyleSheet } from "react-native";
+import { ScrollView, Text, TextInput, Button, StyleSheet } from "react-native";
 import { criarLote } from "../services/loteService";
 
 export default function ComprasScreen() {
@@ -35,7 +35,11 @@ export default function ComprasScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.titulo}>Entrada de Compras</Text>
 
       <Text style={styles.label}>Fornecedor ID</Text>
@@ -72,13 +76,16 @@ export default function ComprasScreen() {
       />
 
       <Button title="Gerar Lote" onPress={handleSalvar} />
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  scroll: {
+    flex: 1
+  },
   container: {
-    flex: 1,
+    flexGrow: 1,
     padding: 20,
     justifyContent: "center"
   },

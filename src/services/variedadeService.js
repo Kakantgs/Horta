@@ -2,12 +2,28 @@ import { ref, set, get, update, remove } from "firebase/database";
 import { db } from "../config/firebaseConfig";
 import { gerarId } from "../utils/idGenerator";
 
+function normalizarTexto(valor) {
+  return String(valor || "").trim();
+}
+
+function normalizarCicloMedio(valor) {
+  const numero = Number(valor || 0);
+
+  if (!Number.isFinite(numero) || numero < 0) {
+    throw new Error("Ciclo médio da variedade inválido.");
+  }
+
+  return numero;
+}
+
 export async function criarVariedade({
   nome,
   categoria,
   ciclo_medio_dias
 }) {
-  if (!nome || !nome.trim()) {
+  const nomeNormalizado = normalizarTexto(nome);
+
+  if (!nomeNormalizado) {
     throw new Error("Nome da variedade é obrigatório.");
   }
 
@@ -15,9 +31,9 @@ export async function criarVariedade({
 
   const novaVariedade = {
     id,
-    nome: nome.trim(),
-    categoria: (categoria || "").trim(),
-    ciclo_medio_dias: Number(ciclo_medio_dias || 0),
+    nome: nomeNormalizado,
+    categoria: normalizarTexto(categoria),
+    ciclo_medio_dias: normalizarCicloMedio(ciclo_medio_dias),
     ativo: true
   };
 
@@ -39,15 +55,19 @@ export async function atualizarVariedade(id, dados) {
   const payload = { ...dados };
 
   if (payload.nome !== undefined) {
-    payload.nome = (payload.nome || "").trim();
+    payload.nome = normalizarTexto(payload.nome);
+
+    if (!payload.nome) {
+      throw new Error("Nome da variedade é obrigatório.");
+    }
   }
 
   if (payload.categoria !== undefined) {
-    payload.categoria = (payload.categoria || "").trim();
+    payload.categoria = normalizarTexto(payload.categoria);
   }
 
   if (payload.ciclo_medio_dias !== undefined) {
-    payload.ciclo_medio_dias = Number(payload.ciclo_medio_dias || 0);
+    payload.ciclo_medio_dias = normalizarCicloMedio(payload.ciclo_medio_dias);
   }
 
   await update(ref(db, `variedades/${id}`), payload);

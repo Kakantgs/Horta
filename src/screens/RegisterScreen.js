@@ -1,53 +1,62 @@
 import React, { useState } from "react";
 import {
-  View,
   Text,
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert
+  Alert,
+  ScrollView
 } from "react-native";
 
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import { ref, set } from "firebase/database";
+import { push, ref, set } from "firebase/database";
 
-import { auth, db } from "../config/firebaseConfig";
+import { db } from "../config/firebaseConfig";
 
 export default function RegisterScreen({ navigation }) {
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
-  const [senha, setSenha] = useState("");
+  const [enviando, setEnviando] = useState(false);
 
   async function handleRegister() {
-    if (!nome || !email || !senha) {
-      Alert.alert("Erro", "Preencha todos os campos");
+    const nomeLimpo = nome.trim();
+    const emailLimpo = email.trim().toLowerCase();
+
+    if (!nomeLimpo || !emailLimpo) {
+      Alert.alert("Erro", "Preencha nome e email");
       return;
     }
 
     try {
-      const userCredential = await createUserWithEmailAndPassword(
-        auth,
-        email,
-        senha
-      );
+      setEnviando(true);
+      const requestRef = push(ref(db, "solicitacoes_acesso"));
 
-      const user = userCredential.user;
-
-      await set(ref(db, `users/${user.uid}`), {
-        nome,
-        email,
+      await set(requestRef, {
+        id: requestRef.key,
+        nome: nomeLimpo,
+        email: emailLimpo,
+        provider: "email",
+        status: "pendente",
         createdAt: Date.now()
       });
 
-      Alert.alert("Sucesso", "Conta criada!");
+      Alert.alert(
+        "Solicitação enviada",
+        "Seu acesso foi solicitado. Aguarde um administrador aprovar sua conta."
+      );
       navigation.navigate("Login");
     } catch (error) {
-      Alert.alert("Erro ao cadastrar", error.message);
+      Alert.alert("Erro ao solicitar acesso", error.message);
+    } finally {
+      setEnviando(false);
     }
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.titulo}>Cadastro</Text>
 
       <TextInput
@@ -66,24 +75,25 @@ export default function RegisterScreen({ navigation }) {
         keyboardType="email-address"
       />
 
-      <TextInput
-        style={styles.input}
-        placeholder="Senha"
-        secureTextEntry
-        value={senha}
-        onChangeText={setSenha}
-      />
-
-      <TouchableOpacity style={styles.botao} onPress={handleRegister}>
-        <Text style={styles.textoBotao}>Cadastrar</Text>
+      <TouchableOpacity
+        style={[styles.botao, enviando && styles.botaoDesabilitado]}
+        onPress={handleRegister}
+        disabled={enviando}
+      >
+        <Text style={styles.textoBotao}>
+          {enviando ? "Enviando..." : "Solicitar acesso"}
+        </Text>
       </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  scroll: {
+    flex: 1
+  },
   container: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: "center",
     padding: 20
   },
@@ -105,6 +115,9 @@ const styles = StyleSheet.create({
     padding: 14,
     borderRadius: 8,
     alignItems: "center"
+  },
+  botaoDesabilitado: {
+    opacity: 0.7
   },
   textoBotao: {
     color: "#fff",

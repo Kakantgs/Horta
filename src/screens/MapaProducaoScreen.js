@@ -5,7 +5,8 @@ import {
   TouchableOpacity,
   StyleSheet,
   Modal,
-  Button
+  Button,
+  ScrollView
 } from "react-native";
 import { onValue, ref } from "firebase/database";
 import { db } from "../config/firebaseConfig";
@@ -115,13 +116,15 @@ export default function MapaProducaoScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       <Text style={styles.titulo}>Mapa da Produção</Text>
       <Text style={styles.legenda}>
-        Toque em uma bancada para abrir opções. Para mover, toque em "Mover" e depois em uma célula livre.
+        Toque em uma bancada para abrir opções. Para mover, toque no botão Mover e depois em uma célula livre.
       </Text>
 
-      <View style={styles.grade}>{renderizarGrade()}</View>
+      <ScrollView horizontal>
+        <View style={styles.grade}>{renderizarGrade()}</View>
+      </ScrollView>
 
       <Modal visible={modalVisible} transparent={true} animationType="slide">
         <View style={styles.overlay}>
@@ -151,13 +154,16 @@ export default function MapaProducaoScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  scroll: {
+    flex: 1
+  },
   container: {
-    flex: 1,
+    flexGrow: 1,
     padding: 10
   },
   titulo: {

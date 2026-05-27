@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   TextInput,
   Alert
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { get, ref } from "firebase/database";
 import { db } from "../config/firebaseConfig";
 import {
@@ -124,6 +125,18 @@ function obterNivelSaldoLote(lote) {
   return { label: "Saldo normal", tipo: "normal" };
 }
 
+function calcularStatusBancadaAtual(bancada, ocupacoesAtivas = []) {
+  if (bancada.active === false || bancada.status === "inativa") return "inativa";
+  if (bancada.status === "manutencao") return "manutencao";
+  if (bancada.status === "alerta") return "alerta";
+
+  const temOcupacaoAtiva = ocupacoesAtivas.some(
+    (ocupacao) => ocupacao.bancada_id === bancada.id
+  );
+
+  return temOcupacaoAtiva ? "ocupada" : "vazia";
+}
+
 export default function DashboardScreen() {
   const [bancadas, setBancadas] = useState([]);
   const [lotesResumo, setLotesResumo] = useState([]);
@@ -194,9 +207,11 @@ export default function DashboardScreen() {
     { label: "Inativa", value: "inativa" }
   ];
 
-  useEffect(() => {
-    carregarTudo();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      carregarTudo();
+    }, [])
+  );
 
   const ocupacaoSelecionada =
     ocupacoesAtivasBancada.find((item) => item.id === ocupacaoSelecionadaId) || null;
@@ -537,15 +552,28 @@ export default function DashboardScreen() {
 
   async function carregarTudo() {
     try {
-      const [bancadasSnapshot, lotes, setoresSnapshot] = await Promise.all([
+      const [bancadasSnapshot, lotes, setoresSnapshot, ocupacoesSnapshot] = await Promise.all([
         get(ref(db, "bancadas")),
         calcularResumoLotes(),
-        get(ref(db, "setores"))
+        get(ref(db, "setores")),
+        get(ref(db, "ocupacoes_bancada"))
       ]);
 
-      setBancadas(
-        bancadasSnapshot.exists() ? Object.values(bancadasSnapshot.val()) : []
-      );
+      const ocupacoesAtivas = ocupacoesSnapshot.exists()
+        ? Object.values(ocupacoesSnapshot.val()).filter(
+            (item) => item.status === "ativa" && Number(item.quantidade_alocada || 0) > 0
+          )
+        : [];
+
+      const listaBancadas = bancadasSnapshot.exists()
+        ? Object.values(bancadasSnapshot.val()).map((bancada) => ({
+            ...bancada,
+            status_banco: bancada.status,
+            status: calcularStatusBancadaAtual(bancada, ocupacoesAtivas)
+          }))
+        : [];
+
+      setBancadas(listaBancadas);
 
       setSetores(
         setoresSnapshot.exists() ? Object.values(setoresSnapshot.val()) : []
@@ -556,6 +584,11 @@ export default function DashboardScreen() {
       setLotesAtivos(
         lotes.filter((lote) => Number(lote.saldo_disponivel_para_ocupar) > 0)
       );
+
+      setBancadaSelecionada((selecionada) => {
+        if (!selecionada) return selecionada;
+        return listaBancadas.find((item) => item.id === selecionada.id) || selecionada;
+      });
     } catch (error) {
       Alert.alert("Erro", error.message);
     }
@@ -993,7 +1026,11 @@ export default function DashboardScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.titulo}>Mapa da Produção</Text>
 
       <OptionSelectField
@@ -1628,12 +1665,13 @@ export default function DashboardScreen() {
           </ScrollView>
         </View>
       </Modal>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 12 },
+  scroll: { flex: 1 },
+  container: { flexGrow: 1, padding: 12 },
   titulo: {
     fontSize: 24,
     fontWeight: "bold",

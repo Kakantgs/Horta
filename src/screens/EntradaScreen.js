@@ -90,11 +90,19 @@ export default function EntradaScreen() {
       const bancadasAtivas = listaBancadas.filter((item) => item.active !== false);
 
       setFornecedores(
-        fornecedoresSnapshot.exists() ? Object.values(fornecedoresSnapshot.val()) : []
+        fornecedoresSnapshot.exists()
+          ? Object.values(fornecedoresSnapshot.val())
+              .filter((item) => item.ativo !== false)
+              .sort((a, b) => (a.nome || "").localeCompare(b.nome || ""))
+          : []
       );
 
       setVariedades(
-        variedadesSnapshot.exists() ? Object.values(variedadesSnapshot.val()) : []
+        variedadesSnapshot.exists()
+          ? Object.values(variedadesSnapshot.val())
+              .filter((item) => item.ativo !== false)
+              .sort((a, b) => (a.nome || "").localeCompare(b.nome || ""))
+          : []
       );
 
       setEntradas(listaEntradas);

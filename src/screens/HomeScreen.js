@@ -1,9 +1,9 @@
 import React from "react";
-import { View, Text, Button, StyleSheet } from "react-native";
+import { View, Text, Button, StyleSheet, ScrollView } from "react-native";
 
 export default function HomeScreen({ navigation }) {
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       <Text style={styles.titulo}>Sistema de Rastreabilidade</Text>
 
       <Button
@@ -22,13 +22,16 @@ export default function HomeScreen({ navigation }) {
         title="Ir para Mapa de Produção"
         onPress={() => navigation.navigate("MapaProducao")}
       />
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  scroll: {
+    flex: 1
+  },
   container: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: "center",
     padding: 20
   },

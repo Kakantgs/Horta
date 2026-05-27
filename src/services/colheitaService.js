@@ -20,7 +20,10 @@ async function recalcularStatusBancada(bancadaId) {
     : [];
 
   const ocupacoesAtivas = ocupacoes.filter(
-    (item) => item.bancada_id === bancadaId && item.status === "ativa"
+    (item) =>
+      item.bancada_id === bancadaId &&
+      item.status === "ativa" &&
+      Number(item.quantidade_alocada || 0) > 0
   );
 
   await update(ref(db, `bancadas/${bancadaId}`), {
@@ -43,7 +46,10 @@ async function recalcularStatusLoteProducao(loteId) {
     : [];
 
   const ocupacoesAtivasDoLote = ocupacoes.filter(
-    (item) => item.lote_producao_id === loteId && item.status === "ativa"
+    (item) =>
+      item.lote_producao_id === loteId &&
+      item.status === "ativa" &&
+      Number(item.quantidade_alocada || 0) > 0
   );
 
   const saldoDisponivel = Number(

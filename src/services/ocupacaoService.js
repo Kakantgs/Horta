@@ -10,7 +10,10 @@ async function recalcularStatusBancada(bancadaId) {
   const ocupacoes = snapshot.exists() ? Object.values(snapshot.val()) : [];
 
   const ocupacoesAtivas = ocupacoes.filter(
-    (item) => item.bancada_id === bancadaId && item.status === "ativa"
+    (item) =>
+      item.bancada_id === bancadaId &&
+      item.status === "ativa" &&
+      Number(item.quantidade_alocada || 0) > 0
   );
 
   await update(ref(db, `bancadas/${bancadaId}`), {
@@ -24,7 +27,12 @@ export async function listarOcupacoesAtivasPorBancada(bancadaId) {
   if (!snapshot.exists()) return [];
 
   return Object.values(snapshot.val())
-    .filter((item) => item.bancada_id === bancadaId && item.status === "ativa")
+    .filter(
+      (item) =>
+        item.bancada_id === bancadaId &&
+        item.status === "ativa" &&
+        Number(item.quantidade_alocada || 0) > 0
+    )
     .sort((a, b) => Number(a.posicao_inicial) - Number(b.posicao_inicial));
 }
 

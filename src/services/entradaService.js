@@ -65,6 +65,14 @@
     const fornecedor = fornecedorSnapshot.val();
     const variedade = variedadeSnapshot.val();
 
+    if (fornecedor.ativo === false) {
+      throw new Error("Fornecedor inativo não pode receber novas entradas.");
+    }
+
+    if (variedade.ativo === false) {
+      throw new Error("Variedade inativa não pode receber novas entradas.");
+    }
+
     const entradaId = gerarId("ent");
     const loteId = gerarId("lot");
 
